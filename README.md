@@ -17,7 +17,7 @@ Configuration stays in the extension’s local storage in that browser profile. 
 
 ## Create a ticket
 
-Use **Ask for ticket** above the Gemini chatbox to fill an editable prompt with the ticket format, then send it using Gemini. **Ask for update** prepares new details for an existing issue; provide its ID and existing text because the extension does not read Linear. Generated updates open Review before any write.
+Use **Ask for ticket** beside Gemini’s three-dot control at the bottom of the chatbox to fill an editable prompt with the ticket format, then send it using Gemini. **Ask for update** prepares new details for an existing issue; provide its ID and existing text because the extension does not read Linear. Generated updates open Review before any write.
 
 Or ask Gemini: “Draft one Linear ticket from this discussion. Return a short `Title:` followed by `Description:` with context and acceptance criteria.”
 

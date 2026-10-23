@@ -12,8 +12,8 @@ fs.cpSync(sourcePath,extensionPath,{recursive:true,filter:p=>!p.includes('/node_
 const contentPath=path.join(extensionPath,'content.js');
 fs.writeFileSync(contentPath,fs.readFileSync(contentPath,'utf8').replaceAll("mode: 'closed'","mode: 'open'"));
 const fixture = `<!doctype html><html><head><meta charset="utf-8"><style>
-body{margin:0;background:#161718;color:#eee;font:15px/1.6 Arial}aside{position:absolute;left:12px;top:12px;width:390px;height:730px;background:#202124;padding:16px;box-sizing:border-box}header{font-size:20px} .bubble{margin:20px 0 16px 80px;background:#303134;border-radius:12px;padding:14px;font-weight:400} .pA4Vnf{margin:16px 0 4px;white-space:pre-line}footer{position:absolute;bottom:16px;left:16px;right:16px;background:#141414;border-radius:10px;padding:16px}[contenteditable]{min-height:40px}.messages{max-height:510px;overflow:auto}.copy{color:#aaa;margin-top:12px}
-</style></head><body><aside data-feed-title="A meeting conversation" data-msl-viewport="true"><header>Gemini</header><div class="messages" role="list"><div role="listitem"><div class="bubble" role="heading"><span jsname="DPm3Gf">Draft a ticket for fixing checkout retries.</span></div></div><div role="listitem" data-generation-index="1"><div class="pA4Vnf">Title: Checkout - Fix payment retries\n\nDescription: Retry failed payments once.\n\nAcceptance criteria:\n- No duplicate charges.</div><div class="copy">Copy · Report</div></div></div><div class="suggestions"><button>Summarize the discussion so far</button><button>What was discussed in the last two minutes?</button></div><footer><div contenteditable="true" aria-label="Ask Gemini" role="combobox">Ask Gemini</div></footer></aside></body></html>`;
+body{margin:0;background:#161718;color:#eee;font:15px/1.6 Arial}aside{position:absolute;left:12px;top:12px;width:390px;height:730px;background:#202124;padding:16px;box-sizing:border-box}header{font-size:20px} .bubble{margin:20px 0 16px 80px;background:#303134;border-radius:12px;padding:14px;font-weight:400} .pA4Vnf{margin:16px 0 4px;white-space:pre-line}footer{position:absolute;bottom:16px;left:16px;right:16px;background:#141414;border-radius:10px;padding:16px}[contenteditable]{min-height:40px}.native-actions{display:flex;gap:8px;align-items:center;height:32px}.native-actions button{width:32px;height:32px}.spark{margin-right:auto;width:20px}.messages{max-height:510px;overflow:auto}.copy{color:#aaa;margin-top:12px}
+</style></head><body><aside data-feed-title="A meeting conversation" data-msl-viewport="true"><header>Gemini</header><div class="messages" role="list"><div role="listitem"><div class="bubble" role="heading"><span jsname="DPm3Gf">Draft a ticket for fixing checkout retries.</span></div></div><div role="listitem" data-generation-index="1"><div class="pA4Vnf">Title: Checkout - Fix payment retries\n\nDescription: Retry failed payments once.\n\nAcceptance criteria:\n- No duplicate charges.</div><div class="copy">Copy · Report</div></div></div><div class="suggestions"><button>Summarize the discussion so far</button><button>What was discussed in the last two minutes?</button></div><footer><div contenteditable="true" aria-label="Ask Gemini" role="combobox">Ask Gemini</div><div class="native-actions"><span class="spark">✦</span><button aria-label="More actions" aria-expanded="false">⋮</button><button aria-label="Submit">↑</button></div></footer></aside></body></html>`;
 (async()=>{
   const context = await chromium.launchPersistentContext(profile, {
     executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium', headless:true,
@@ -55,14 +55,24 @@ body{margin:0;background:#161718;color:#eee;font:15px/1.6 Arial}aside{position:a
     assert.equal(await page.getByRole('button',{name:'Send to Linear ↗',exact:true}).count(),2); // two message controls; global fallback is hidden
     for (const width of [390, 320]) {
       await page.locator('aside').evaluate((el, width) => el.style.width = width + 'px', width);
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
       const prompts = await page.locator('#threadport-prompts').boundingBox();
       const inputBox = await page.locator('[aria-label="Ask Gemini"]').boundingBox();
-      const suggestions = await page.locator('.suggestions').boundingBox();
-      assert.ok(prompts.y >= suggestions.y + suggestions.height, 'Prompt row must follow native suggestions');
-      assert.ok(prompts.y + prompts.height <= inputBox.y, 'Prompt row must not cover the composer');
-      assert.equal(await page.locator('#threadport-prompts').evaluate(el => getComputedStyle(el).position), 'static');
+      const menu = await page.getByRole('button',{name:'More actions',exact:true}).boundingBox();
+      const spark = await page.locator('.spark').boundingBox();
+      assert.ok(Math.abs(prompts.y + prompts.height / 2 - menu.y - menu.height / 2) < 2, 'Prompt row must align with three dots');
+      assert.ok(prompts.x + prompts.width <= menu.x - 7, 'Prompt row must leave the menu uncovered');
+      assert.ok(prompts.x >= spark.x + spark.width, 'Prompt row must leave Gemini icon uncovered');
+      assert.ok(prompts.y >= inputBox.y + inputBox.height, 'Prompt row belongs below the text entry');
+      assert.equal(await page.locator('#threadport-prompts').evaluate(el => getComputedStyle(el).position), 'fixed');
     }
     await page.locator('aside').evaluate(el => el.style.width = '390px');
+    await page.getByRole('button',{name:'More actions',exact:true}).evaluate(el => el.setAttribute('aria-expanded','true'));
+    await page.locator('#threadport-prompts').waitFor({state:'hidden'});
+    await page.getByRole('button',{name:'More actions',exact:true}).evaluate(el => el.setAttribute('aria-expanded','false'));
+    await page.getByRole('button',{name:'Ask for ticket',exact:true}).waitFor();
+    await page.locator('footer').evaluate(el => el.outerHTML = el.outerHTML);
+    await page.getByRole('button',{name:'Ask for ticket',exact:true}).waitFor();
     await page.screenshot({path:path.join(sourcePath,'preview.png')});
     // Scripted events must never send user data.
     await answer.getByRole('button',{name:'Send to Linear ↗',exact:true}).evaluate(el=>el.click());
@@ -147,6 +157,6 @@ body{margin:0;background:#161718;color:#eee;font:15px/1.6 Arial}aside{position:a
     await page.getByRole('button',{name:'Cancel',exact:true}).click();
     // The key cannot be read by the content script's isolated world.
     assert.deepEqual(errors,[]);
-    console.log('PASS: popup before writes, create/replace/append, JSON field separation, Markdown, prompt templates, 320/390px non-overlapping layout, duplicate protection, and no scripted sends. No real Linear calls.');
+    console.log('PASS: popup before writes, create/replace/append, JSON field separation, Markdown, prompt templates, 320/390px menu-aligned floating layout and footer rerender, duplicate protection, and no scripted sends. No real Linear calls.');
   } finally { await context.close(); fs.rmSync(profile,{recursive:true,force:true}); }
 })().catch(error=>{console.error(error);process.exitCode=1;});

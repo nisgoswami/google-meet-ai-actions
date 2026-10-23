@@ -45,9 +45,9 @@
     </dialog>`;
   const promptHost = document.createElement('div');
   promptHost.id = 'threadport-prompts';
-  promptHost.style.cssText = 'display:block;position:static;flex:0 0 auto;width:100%;box-sizing:border-box;padding:0 8px 8px;';
+  promptHost.style.cssText = 'display:none;position:fixed;z-index:2147483645;box-sizing:border-box;';
   const promptShadow = promptHost.attachShadow({ mode: 'closed' });
-  promptShadow.innerHTML = `<style>:host{color-scheme:dark}.prompts{display:flex;flex-wrap:wrap;align-items:center;gap:8px}button{font:500 12px/1.3 Arial,sans-serif;white-space:nowrap;padding:8px 12px;border:1px solid #55565d;border-radius:18px;background:#202124;color:#dadce0;cursor:pointer}button:hover{background:#3c4043}button:focus-visible{outline:2px solid #c4b5fd;outline-offset:2px}</style><div class="prompts" aria-label="Gemini ticket prompts"><button id="ask-ticket" title="Prepare a ticket prompt in Ask Gemini">Ask for ticket</button><button id="ask-update" title="Prepare an issue update prompt in Ask Gemini">Ask for update</button></div>`;
+  promptShadow.innerHTML = `<style>:host{color-scheme:dark}.prompts{display:flex;align-items:center;gap:4px}button{flex:1;min-width:0;font:500 10px/1.2 Arial,sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:7px 6px;border:1px solid #55565d;border-radius:18px;background:#202124;color:#dadce0;cursor:pointer}button:hover{background:#3c4043}button:focus-visible{outline:2px solid #c4b5fd;outline-offset:2px}</style><div class="prompts" aria-label="Gemini ticket prompts"><button id="ask-ticket" title="Prepare a ticket prompt in Ask Gemini">Ask for ticket</button><button id="ask-update" title="Prepare an issue update prompt in Ask Gemini">Ask for update</button></div>`;
   const $ = id => shadow.getElementById(id) || promptShadow.getElementById(id);
   const buttons = [$('send'), $('create')];
   let input, panel, busy = false, captured = '', config = null, toastTimer, pendingIntent = 'create';
@@ -292,8 +292,22 @@
       promptHost.remove();
       return;
     }
-    const promptContainer = adapter.promptContainer(input);
-    if (promptContainer && promptHost.parentElement !== promptContainer) promptContainer.prepend(promptHost);
+    // Keep the controls outside Gemini's rerendered footer, aligned with its menu.
+    const anchor = adapter.promptAnchor(input);
+    if (!promptHost.isConnected) document.documentElement.append(promptHost);
+    promptHost.style.display = 'none';
+    if (anchor && visible(anchor) && anchor.getAttribute('aria-expanded') !== 'true') {
+      const menuBox = anchor.getBoundingClientRect();
+      const textBox = input.getBoundingClientRect();
+      const available = menuBox.left - textBox.left - 44;
+      const promptWidth = Math.min(180, available);
+      if (promptWidth > 100) {
+        promptHost.style.width = `${promptWidth}px`;
+        promptHost.style.left = `${menuBox.left - promptWidth - 8}px`;
+        promptHost.style.display = 'block';
+        promptHost.style.top = `${menuBox.top + (menuBox.height - promptHost.getBoundingClientRect().height) / 2}px`;
+      }
+    }
     if (!host.isConnected) document.documentElement.append(host);
     const box = (input.closest('footer') || input.parentElement).getBoundingClientRect();
     const inputBox = input.getBoundingClientRect();
@@ -311,7 +325,9 @@
     requestAnimationFrame(() => { queued = false; reposition(); });
   }
   // Do not observe our own UI, which lives in its shadow root.
-  new MutationObserver(schedule).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style', 'hidden', 'aria-hidden'] });
+  new MutationObserver(records => {
+    if (records.some(record => record.target !== host && record.target !== promptHost && !record.target.closest?.('.meet-linear-message'))) schedule();
+  }).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style', 'hidden', 'aria-hidden', 'aria-expanded'] });
   window.addEventListener('resize', schedule);
   document.addEventListener('scroll', schedule, true);
   document.addEventListener('visibilitychange', schedule);
