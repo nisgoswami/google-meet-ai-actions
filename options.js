@@ -45,3 +45,23 @@ $('prompts-form').addEventListener('submit',async event=>{
   try {await message({type:'savePrompts',prompts:{create:$('create-prompt').value,update:$('update-prompt').value}});$('prompts-status').textContent='Prompt templates saved.';}
   catch(error){$('prompts-status').textContent=error.message;}
 });
+
+let loadedDefaultOptions=false;
+async function loadDefaults(){
+  $('defaults-status').textContent='Loading team statuses and people…';
+  try {
+    const data=await message({type:'getTeamOptions'});
+    for(const [id,rows,initial] of [['default-state',data.states,'Team default'],['default-assignee',data.members,'Unassigned']]){
+      const select=$(id);select.replaceChildren();
+      for(const row of [{id:'',name:initial},...rows]){const option=document.createElement('option');option.value=row.id;option.textContent=row.name;select.append(option);}
+    }
+    $('default-state').value=data.defaults.stateId||'';$('default-assignee').value=data.defaults.assigneeId||'';loadedDefaultOptions=true;$('defaults-status').textContent='Team options loaded.';
+  }catch(error){$('defaults-status').textContent=error.message;}
+}
+$('load-defaults').addEventListener('click',loadDefaults);
+$('defaults-form').addEventListener('submit',async event=>{
+  event.preventDefault();
+  if(!loadedDefaultOptions){$('defaults-status').textContent='Load team statuses and people first.';return;}
+  try{await message({type:'saveIssueDefaults',stateId:$('default-state').value,assigneeId:$('default-assignee').value||null});$('defaults-status').textContent='Ticket defaults saved.';}
+  catch(error){$('defaults-status').textContent=error.message;}
+});

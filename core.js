@@ -61,6 +61,10 @@
     description = withoutRepeatedTitle(description,title);
     return issueId ? { title, description, issueId: issueId.toUpperCase() } : { title, description };
   }
+  function detectUpdate(text, teamPrefix) {
+    const ids = [...new Set((String(text).match(/\b[A-Z][A-Z0-9_]*-[1-9][0-9]*\b/gi) || []).map(id=>id.toUpperCase()))].filter(id=>!teamPrefix || id.startsWith(teamPrefix.toUpperCase()+'-'));
+    return {issueId:ids.length===1 ? ids[0] : '', ids, updating:ids.length>0 || /\b(?:update|revise|amend|append to)\s+(?:(?:the|this|an|existing)\s+)*(?:ticket|issue)\b|\b(?:ticket|issue)\s+update\b/i.test(String(text))};
+  }
   function meetingUrl(url) {
     const value = new URL(url);
     const match = value.pathname.match(/^\/(?:meet\/)?([a-z]{3}-[a-z]{4}-[a-z]{3})\/?$/);
@@ -71,7 +75,7 @@
     const source = meetingUrl(url);
     return clean(description) + (source ? `\n\n---\nSource: [Google Meet](${source})` : '');
   }
-  const api = { clean, withoutRepeatedTitle, parseTicket, meetingUrl, descriptionWithSource };
+  const api = { clean, withoutRepeatedTitle, parseTicket, detectUpdate, meetingUrl, descriptionWithSource };
   root.MeetLinearCore = api;
   if (typeof module !== 'undefined') module.exports = api;
 })(globalThis);

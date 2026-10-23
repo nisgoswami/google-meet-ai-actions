@@ -141,3 +141,41 @@ test('only extension settings can save prompt templates', async () => {
   assert.equal((await h.call({type:'getPrompts'})).prompts.create,'Topic: {{topic}}');
   assert.equal((await h.call({type:'savePrompts',prompts:{create:'',update:'B'}},options)).ok,false);
 });
+
+function metadataResult(){return {ok:true,status:200,json:async()=>({data:{team:{id:'fixed-team',states:{nodes:[{id:'backlog',name:'Backlog',type:'backlog',position:0},{id:'started',name:'In Progress',type:'started',position:1}]},members:{nodes:[{id:'member-1',name:'Alex',active:true}],pageInfo:{hasNextPage:false}}}}})};}
+test('validates statuses and assignees against the configured team before writing',async()=>{
+  const h=harness(async(_url,options)=>JSON.parse(options.body).query.includes('team(id:') ? metadataResult() : success);
+  const result=await h.call({type:'create',ticket,stateId:'backlog',assigneeId:'member-1'});
+  assert.equal(result.ok,true);
+  const input=JSON.parse(h.calls.at(-1).body).variables.input;
+  assert.equal(input.stateId,'backlog');assert.equal(input.assigneeId,'member-1');
+  const count=h.calls.length;
+  assert.equal((await h.call({type:'create',ticket,stateId:'foreign-state'})).ok,false);
+  assert.equal((await h.call({type:'create',ticket,assigneeId:'foreign-user'})).ok,false);
+  assert.equal(h.calls.length,count);
+});
+test('saved defaults apply to creation while updates preserve omitted properties',async()=>{
+  const h=harness(async(_url,options)=>{
+    const q=JSON.parse(options.body).query;
+    if(q.includes('team(id:')) return metadataResult();
+    return q.includes('issueUpdate') ? {ok:true,status:200,json:async()=>({data:{issueUpdate:{success:true,issue:{identifier:'ENG-1',url:'https://linear.app/example/issue/ENG-1'}}}})} : success;
+  });
+  const options={url:'chrome-extension://test/options.html'};
+  assert.equal((await h.call({type:'saveIssueDefaults',stateId:'backlog',assigneeId:'member-1'},options)).ok,true);
+  assert.equal((await h.call({type:'saveIssueDefaults',stateId:'started'})).ok,false);
+  await h.call({type:'create',ticket});
+  assert.equal(JSON.parse(h.calls.at(-1).body).variables.input.assigneeId,'member-1');
+  await h.call({type:'update',issueId:'ENG-1',replaceDescription:true,ticket});
+  const input=JSON.parse(h.calls.at(-1).body).variables.input;
+  assert.equal(input.stateId,undefined);assert.equal(input.assigneeId,undefined);
+});
+test('exact-title update matching is team-scoped',async()=>{
+  const h=harness(async(_url,options)=>{
+    const variables=JSON.parse(options.body).variables;
+    assert.equal(variables.filter.team.id.eq,'fixed-team');
+    assert.equal(variables.filter.title.eq,'Feature - Improve layout');
+    return {ok:true,status:200,json:async()=>({data:{issues:{nodes:[{identifier:'ENG-12',title:'Feature - Improve layout',url:'https://linear.app/example/issue/ENG-12',team:{id:'fixed-team'}}]}}})};
+  });
+  const result=await h.call({type:'findMatchingIssues',title:'Feature - Improve layout'});
+  assert.equal(result.issues[0].identifier,'ENG-12');
+});

@@ -50,9 +50,11 @@ body{margin:0;background:#161718;color:#eee;font:15px/1.6 Arial}aside{position:a
           globalThis.testReadRequests.push(body);
           const issue={identifier:'ENG-42',title:'Checkout - Fix payment retries',description:'## Existing requirements\n- Preserve payment checks.',createdAt:'2026-10-23T10:00:00Z',updatedAt:'2026-10-23T11:00:00Z',url:'https://linear.app/example/issue/ENG-42',team:{id:'00000000-0000-4000-8000-000000000001'}};
           let data;
-          if(body.query.includes('issues(')){
+          if(body.query.includes('team(id:')) {
+            data={team:{id:'00000000-0000-4000-8000-000000000001',states:{nodes:[{id:'backlog',name:'Backlog',type:'backlog',position:0},{id:'started',name:'In Progress',type:'started',position:1}]},members:{nodes:[{id:'member-1',name:'Alex',displayName:'Alex',active:true},{id:'member-2',name:'Sam',displayName:'Sam',active:true}],pageInfo:{hasNextPage:false,endCursor:null}}}};
+          } else if(body.query.includes('issues(')){
             const newer={...issue,identifier:'ENG-43',title:'Checkout - Improve receipts',url:'https://linear.app/example/issue/ENG-43',createdAt:'2026-10-24T10:00:00Z'};
-            data={issues:{nodes:body.variables.filter.or ? [issue] : [issue,newer],pageInfo:{hasNextPage:false,endCursor:null}}};
+            data={issues:{nodes:body.variables.filter.title ? body.variables.filter.title.eq==='Matched Feature - Update requirements' ? [issue] : [] : body.variables.filter.or ? [issue] : [issue,newer],pageInfo:{hasNextPage:false,endCursor:null}}};
           } else data={issue};
           return new Response(JSON.stringify({data}),{status:200,headers:{'Content-Type':'application/json'}});
         }
@@ -61,6 +63,12 @@ body{margin:0;background:#161718;color:#eee;font:15px/1.6 Arial}aside{position:a
         return new Response(JSON.stringify({data:{[action]:{success:true,issue:{identifier:'ENG-42',url:'https://linear.app/example/issue/ENG-42'}}}}),{status:200,headers:{'Content-Type':'application/json'}});
       };
     });
+    await setup.getByRole('button',{name:'Load team statuses and people',exact:true}).click();
+    await setup.getByText('Team options loaded.',{exact:true}).waitFor();
+    await setup.locator('#default-state').selectOption('backlog');
+    await setup.locator('#default-assignee').selectOption('member-1');
+    await setup.getByRole('button',{name:'Save ticket defaults',exact:true}).click();
+    await setup.getByText('Ticket defaults saved.',{exact:true}).waitFor();
     const page=await context.newPage();
     page.on('pageerror',err=>errors.push(err.message));
     // Open shadow roots in this test only so Playwright can inspect the UI.
@@ -97,15 +105,19 @@ body{margin:0;background:#161718;color:#eee;font:15px/1.6 Arial}aside{position:a
     await answer.getByRole('button',{name:'Send to Linear ↗',exact:true}).click();
     assert.equal(await worker.evaluate(()=>testRequests.length),0);
     await page.locator('#mode').selectOption('create');
+    await page.getByText('Defaults apply to new tickets.',{exact:false}).waitFor();
     await page.getByRole('button',{name:'Create ticket ↗',exact:true}).click();
     await page.getByText('Created:',{exact:false}).waitFor();
     let requests=await worker.evaluate(()=>testRequests);
     assert.equal(requests.length,1);
     assert.equal(requests[0].variables.input.title,'Checkout - Fix payment retries');
+    assert.equal(requests[0].variables.input.stateId,'backlog');
+    assert.equal(requests[0].variables.input.assigneeId,'member-1');
     assert.match(requests[0].variables.input.description,/No duplicate charges/);
     assert.doesNotMatch(requests[0].variables.input.description,/Draft a ticket/);
     await answer.getByRole('button',{name:'Send to Linear ↗',exact:true}).click();
     await page.locator('#mode').selectOption('create');
+    await page.getByText('Defaults apply to new tickets.',{exact:false}).waitFor();
     await page.getByRole('button',{name:'Create ticket ↗',exact:true}).click();
     await page.getByText('Already sent:',{exact:false}).waitFor();
     assert.equal(await worker.evaluate(()=>testRequests.length),1);
@@ -119,6 +131,8 @@ body{margin:0;background:#161718;color:#eee;font:15px/1.6 Arial}aside{position:a
     requests=await worker.evaluate(()=>testRequests);
     assert.equal(requests[1].variables.id,'ENG-42');
     assert.equal(requests[1].variables.input.title,undefined);
+    assert.equal(requests[1].variables.input.stateId,undefined);
+    assert.equal(requests[1].variables.input.assigneeId,undefined);
     assert.match(requests[1].variables.input.description,/Revised acceptance/);
     // Re-rendering a card, and changing Gemini's conversation title, retains controls.
     await page.locator('[data-generation-index="1"] .pA4Vnf').evaluate(el=>el.outerHTML='<div class="pA4Vnf">Title: A new draft\nDescription: New details</div>');
@@ -166,9 +180,11 @@ body{margin:0;background:#161718;color:#eee;font:15px/1.6 Arial}aside{position:a
     assert.equal(await worker.evaluate(()=>testRequests.length), 2);
     // Append combines the explicit current body with the new details, keeping the title.
     await answer.getByRole('button',{name:'Send to Linear ↗',exact:true}).click();
+    await page.waitForFunction(()=>document.querySelector('#meet-to-linear').shadowRoot.getElementById('existing-description').value.includes('Preserve payment checks'));
     await page.locator('#mode').selectOption('append');
     await page.locator('#issue-id').fill('ENG-42');
-    await page.locator('#existing-description').fill('## Existing requirements\n- Keep this requirement.');
+    await page.waitForFunction(()=>document.querySelector('#meet-to-linear').shadowRoot.getElementById('existing-description').value.includes('Preserve payment checks'));
+    assert.equal(await page.locator('#existing-description').getAttribute('readonly'),'');
     await page.getByRole('button',{name:'Append to ticket ↗',exact:true}).click();
     await page.getByText('Updated:',{exact:false}).waitFor();
     requests = await worker.evaluate(()=>testRequests);
@@ -214,6 +230,28 @@ body{margin:0;background:#161718;color:#eee;font:15px/1.6 Arial}aside{position:a
     assert.match(await page.locator('#description').inputValue(), /## Requirements/);
     assert.doesNotMatch(await page.locator('#description').inputValue(), /Social Engagement Agent/);
     await page.getByRole('button',{name:'Cancel',exact:true}).click();
+    // Matching titles and links are detected as updates before any write.
+    await answer.locator('.pA4Vnf').evaluate(el=>el.textContent='# Matched Feature - Update requirements\n\n## Summary\nNew details.');
+    await answer.getByRole('button',{name:'Send to Linear ↗',exact:true}).click();
+    await page.waitForFunction(()=>document.querySelector('#meet-to-linear').shadowRoot.getElementById('issue-id').value==='ENG-42');
+    assert.equal(await page.locator('#mode').inputValue(),'update');
+    await page.getByRole('button',{name:'Cancel',exact:true}).click();
+    await answer.locator('.pA4Vnf').evaluate(el=>el.textContent='# Feature - Improve layout\n\nUpdate the existing ticket https://linear.app/example/issue/ENG-42/details');
+    await answer.getByRole('button',{name:'Send to Linear ↗',exact:true}).click();
+    assert.equal(await page.locator('#issue-id').inputValue(),'ENG-42');
+    assert.equal(await page.locator('#mode').inputValue(),'update');
+    await page.getByRole('button',{name:'Cancel',exact:true}).click();
+    // Per-send status and assignee overrides reach the create mutation.
+    await answer.locator('.pA4Vnf').evaluate(el=>el.textContent='# Other Feature - Improve navigation\n\n## Summary\nNew navigation work.');
+    await answer.getByRole('button',{name:'Send to Linear ↗',exact:true}).click();
+    await page.locator('#mode').selectOption('create');
+    await page.getByText('Defaults apply to new tickets.',{exact:false}).waitFor();
+    await page.locator('#issue-state').selectOption('started');
+    await page.locator('#issue-assignee').selectOption('member-2');
+    await page.getByRole('button',{name:'Create ticket ↗',exact:true}).click();
+    await page.getByText('Created:',{exact:false}).waitFor();
+    const override=await worker.evaluate(()=>testRequests.at(-1).variables.input);
+    assert.equal(override.stateId,'started');assert.equal(override.assigneeId,'member-2');
     // The key cannot be read by the content script's isolated world.
     assert.deepEqual(errors,[]);
     console.log('PASS: popup before writes, create/replace/append, JSON field separation, Markdown, prompt templates, 320/390px menu-aligned floating layout and footer rerender, duplicate protection, and no scripted sends. No real Linear calls.');

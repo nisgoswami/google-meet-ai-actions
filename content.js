@@ -20,7 +20,7 @@
       dialog {position:fixed;inset:0;width:min(540px,calc(100vw - 32px));max-height:calc(100vh - 40px);overflow:auto;background:#202124;color:#eee;border:1px solid #55565d;border-radius:14px;padding:24px;box-shadow:0 14px 60px #0009;font:14px/1.5 Arial,sans-serif}
       dialog::backdrop {background:#0007} h2 {margin:0 0 8px;font-size:21px} p {color:#bdc1c6;margin:6px 0 18px}
       label {display:block;margin:16px 0 6px;font-weight:600} input,textarea,select {width:100%;font:14px/1.5 Arial,sans-serif;padding:10px;background:#151619;color:#eee;border:1px solid #5f6368;border-radius:7px} textarea {min-height:200px;resize:vertical} input[type=checkbox] {width:auto;margin-right:8px} .fields label {margin:8px 0;font-weight:400}
-      .ticket-list{max-height:320px;overflow:auto;display:grid;gap:6px}.ticket-list button{text-align:left;white-space:normal;padding:12px;background:#292a30;line-height:1.5}.ticket-list small{display:block;color:#bdc1c6;font-weight:400}.actions {display:flex;gap:8px;justify-content:flex-end;margin-top:18px}.hint {font-size:12px;color:#bdc1c6}.error {color:#f2b8b5}
+      .properties{display:grid;grid-template-columns:1fr 1fr;gap:12px}.ticket-list{max-height:320px;overflow:auto;display:grid;gap:6px}.ticket-list button{text-align:left;white-space:normal;padding:12px;background:#292a30;line-height:1.5}.ticket-list small{display:block;color:#bdc1c6;font-weight:400}.actions {display:flex;gap:8px;justify-content:flex-end;margin-top:18px}.hint {font-size:12px;color:#bdc1c6}.error {color:#f2b8b5}
     </style>
     <div class="bar" id="bar" aria-label="Meet to Linear">
       <button class="primary" id="send" title="Send selected text or the latest Gemini answer to Linear">Send to Linear ↗</button>
@@ -32,14 +32,15 @@
       <h2 id="editor-title">Send to Linear</h2><p id="destination">One ticket from the text you choose.</p>
       <label for="mode">Action</label><select id="mode"><option value="" disabled>Choose an action</option><option value="create">Create a new ticket</option><option value="update">Replace an existing ticket description</option><option value="append">Append to an existing ticket description</option></select>
       <div id="update-fields" hidden>
-        <label for="issue-id">Existing issue ID</label><input id="issue-id" placeholder="ENG-123" autocomplete="off" spellcheck="false">
+        <button id="choose-existing">Choose an existing ticket</button><label for="issue-id">Existing issue ID</label><input id="issue-id" placeholder="ENG-123" autocomplete="off" spellcheck="false">
         <div class="fields"><label><input id="replace-title" type="checkbox">Replace title</label><label><input id="replace-description" type="checkbox" checked>Replace description</label></div>
         <p class="hint" id="update-hint">Only checked fields are replaced.</p>
         <div id="append-fields" hidden><label for="existing-description">Current ticket description</label><textarea id="existing-description" placeholder="Paste the current description from Linear"></textarea><p class="hint">Paste the latest description to preserve it. Appending keeps your API key permissions unchanged. For an empty description, choose Replace.</p></div>
       </div>
       <label for="title">Title</label><input id="title" maxlength="250" autocomplete="off" placeholder="Page or Feature - Improvement or Bug Fix"><p class="hint">Example: Instagram Review - Match comment previews to Instagram</p>
       <label for="description">Description</label><textarea id="description" maxlength="50000" placeholder="Paste or edit the ticket details…"></textarea>
-      <p class="hint">Your Meet link is included. Only these fields go to Linear.</p>
+      <div class="properties"><div><label for="issue-state">Status</label><select id="issue-state"><option value="">Team default</option></select></div><div><label for="issue-assignee">Assign to</label><select id="issue-assignee"><option value="">Unassigned</option></select></div></div><p id="properties-status" class="hint" role="status"></p>
+      <p class="hint">Your Meet link is included. Only selected fields go to Linear.</p>
       <div id="editor-status" role="status" aria-live="polite"></div>
       <div class="actions"><button id="cancel">Cancel</button><button class="primary" id="create">Create ticket ↗</button></div>
     </dialog>
@@ -52,7 +53,7 @@
   promptShadow.innerHTML = `<style>:host{color-scheme:dark}.prompts{display:flex;align-items:center;gap:4px}button{flex:1;min-width:0;font:500 10px/1.2 Arial,sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:7px 6px;border:1px solid #55565d;border-radius:18px;background:#202124;color:#dadce0;cursor:pointer}button:hover{background:#3c4043}button:focus-visible{outline:2px solid #c4b5fd;outline-offset:2px}</style><div class="prompts" aria-label="Gemini ticket prompts"><button id="ask-ticket" title="Prepare a ticket prompt in Ask Gemini">Ask for ticket</button><button id="ask-update" title="Prepare an issue update prompt in Ask Gemini">Ask for update</button></div>`;
   const $ = id => shadow.getElementById(id) || promptShadow.getElementById(id);
   const buttons = [$('send'), $('create')];
-  let input, panel, busy = false, captured = '', config = null, toastTimer, pendingIntent = 'create', pendingIssue = null, editorIssue = null;
+  let input, panel, busy = false, captured = '', config = null, toastTimer, pendingIntent = 'create', pendingIssue = null, editorIssue = null, teamMetadata = null, editorSession = 0, detectionGeneration = 0;
   const updateResponses = new WeakSet();
   const responseIssues = new WeakMap();
   const messageButtons = new Map();
@@ -127,30 +128,42 @@
     let draft;
     try { draft = parseTicket(text); }
     catch { draft = { title: '', description: text }; }
+    const session = ++editorSession; const detection = ++detectionGeneration;
+    const detected = MeetLinearCore.detectUpdate(text,config?.teamKey);
+    if(!draft.issueId && detected.issueId) draft.issueId = detected.issueId;
     editorIssue = issue && (!draft.issueId || draft.issueId === issue.identifier) ? issue : null;
     if (editorIssue) draft.issueId = editorIssue.identifier;
     $('title').value = draft.title;
     $('description').value = draft.description;
-    const updating = Boolean(draft.issueId) || intent === 'update';
+    const updating = Boolean(draft.issueId) || intent === 'update' || detected.updating;
     $('mode').value = updating ? 'update' : '';
     $('existing-description').value = editorIssue?.description || '';
-    syncActionUI();
     $('issue-id').value = draft.issueId || '';
     $('replace-title').checked = false;
     $('replace-description').checked = true;
+    syncActionUI();
+    refreshProperties();
     $('editor-status').textContent = '';
     if (!$('editor').open) $('editor').showModal();
     $('title').focus();
     captured = '';
     status().catch(error => $('editor-status').textContent = error.message);
+    loadEditorMetadata(session);
+    detectExistingTicket(draft,detected,detection);
   }
   async function create(ticket, update = null) {
     if (busy) return;
     busy = true;
     buttons.forEach(button => button.disabled = true);
+    const properties = {};
+    if(teamMetadata) {
+      if($('issue-state').value) properties.stateId=$('issue-state').value;
+      const assignee=$('issue-assignee').value;
+      if(!update || assignee) properties.assigneeId=assignee==='__unassigned__' || !assignee ? null : assignee;
+    }
     notify(update ? 'Updating in Linear…' : 'Sending to Linear…');
     try {
-      const result = await sendMessage(update ? { type: 'update', ticket, ...update } : { type: 'create', ticket });
+      const result = await sendMessage(update ? { type: 'update', ticket, ...update, ...properties } : { type: 'create', ticket, ...properties });
       $('editor').close();
       notify(result.updated ? 'Updated:' : result.alreadySent ? 'Already sent:' : 'Created:', result.issue);
       captured = '';
@@ -229,6 +242,48 @@
     if (event.isTrusted) sendMessage({ type: 'openSettings' }).catch(error => notify(error.message));
   });
   $('cancel').addEventListener('click', () => { if (!busy) $('editor').close(); });
+  function fillSelect(select, initial, rows) {
+    select.replaceChildren();
+    for(const [value,label] of [initial,...rows]) {const option=document.createElement('option');option.value=value;option.textContent=label;select.append(option);}
+  }
+  function refreshProperties() {
+    const creating=$('mode').value==='create' || !$('mode').value;
+    fillSelect($('issue-state'),['',creating ? 'Team default' : editorIssue?.state?.name ? `Keep current status (${editorIssue.state.name})` : 'Keep current status'],(teamMetadata?.states||[]).map(state=>[state.id,state.name]));
+    fillSelect($('issue-assignee'),['',creating ? 'Unassigned' : editorIssue?.assignee?.name ? `Keep current assignee (${editorIssue.assignee.name})` : 'Keep current assignee'],[...(!creating ? [['__unassigned__','Unassigned']] : []),...(teamMetadata?.members||[]).map(member=>[member.id,member.name])]);
+    if(creating && teamMetadata) {
+      $('issue-state').value=teamMetadata.defaults.stateId || '';
+      $('issue-assignee').value=teamMetadata.defaults.assigneeId || '';
+    }
+  }
+  async function loadEditorMetadata(session) {
+    $('properties-status').textContent='Loading team statuses and people…';
+    try {
+      const result=await sendMessage({type:'getTeamOptions'});
+      if(session!==editorSession || !$('editor').open)return;
+      teamMetadata=result;refreshProperties();$('properties-status').textContent='Defaults apply to new tickets. Updates keep current status and assignee unless you change them.';
+    }catch(error){if(session===editorSession)$('properties-status').textContent=error.message;}
+  }
+  async function selectEditorIssue(issue) {
+    editorIssue=issue;$('issue-id').value=issue.identifier;$('existing-description').value=issue.description || '';$('mode').value='update';syncActionUI();refreshProperties();
+    $('editor-status').textContent=`Updating ${issue.identifier}. Review the draft and confirm.`;
+  }
+  async function detectExistingTicket(draft, detected, generation) {
+    if(editorIssue) { $('editor-status').textContent=`Updating ${editorIssue.identifier}. Review the draft and confirm.`;return; }
+    try {
+      let identifier=draft.issueId;
+      if(!identifier && !detected.ids.length) {
+        const {issues}=await sendMessage({type:'findMatchingIssues',title:draft.title});
+        if(generation!==detectionGeneration || !$('editor').open)return;
+        if(issues.length===1) identifier=issues[0].identifier;
+        else if(issues.length>1) {$('mode').value='update';syncActionUI();refreshProperties();$('editor-status').textContent='Multiple existing tickets have this title. Choose the one to update.';return;}
+      }
+      if(identifier) {
+        const {issue}=await sendMessage({type:'getIssue',issueId:identifier});
+        if(generation!==detectionGeneration || !$('editor').open)return;
+        await selectEditorIssue(issue);
+      } else if(detected.updating) $('editor-status').textContent='Update detected. Choose the existing ticket before sending.';
+    }catch(error){if(generation===detectionGeneration && $('editor').open)$('editor-status').textContent=error.message;}
+  }
   function syncActionUI() {
     const mode = $('mode').value;
     const updating = mode === 'update' || mode === 'append';
@@ -243,7 +298,7 @@
     $('create').disabled = !mode || busy;
   }
   $('mode').addEventListener('change', () => {
-    syncActionUI();
+    ++detectionGeneration;syncActionUI();refreshProperties();
     if ($('mode').value !== 'create') $('issue-id').focus();
   });
   $('editor').addEventListener('cancel', event => { if (busy) event.preventDefault(); });
@@ -280,7 +335,7 @@
     input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: prompt }));
     notify('Prompt ready. Send it to Gemini when ready.');
   }
-  let pickerPage = null, pickerRows = [], searchTimer, pickerGeneration = 0;
+  let pickerPage = null, pickerRows = [], searchTimer, pickerGeneration = 0, pickerPurpose = 'prompt';
   async function loadTickets(reset = true) {
     const generation = ++pickerGeneration;
     if (reset) { pickerRows = []; pickerPage = null; $('ticket-list').replaceChildren(); }
@@ -306,7 +361,7 @@
             if (!$('ticket-picker').open) return;
             const topic = $('update-topic').value.trim() || current.title;
             $('ticket-picker').close();
-            await preparePrompt(true,topic,current);
+            if(pickerPurpose==='editor') {++detectionGeneration;await selectEditorIssue(current);} else await preparePrompt(true,topic,current);
           } catch(error) { $('picker-status').textContent=error.message; notify(error.message); }
           finally {button.disabled=false;}
         });
@@ -331,15 +386,22 @@
   });
   $('ask-update').addEventListener('click',async event=>{
     if (!event.isTrusted || busy) return;
+    pickerPurpose='prompt';
     $('ticket-search').value=''; $('update-topic').value=clean(input?.innerText || input?.value);
     $('ticket-picker').showModal(); $('ticket-search').focus();
     await loadTickets();
   });
+  $('choose-existing').addEventListener('click',async event=>{
+    if(!event.isTrusted || busy)return;
+    pickerPurpose='editor';$('ticket-search').value=$('title').value.split(' - ')[0];$('update-topic').value='';$('ticket-picker').showModal();await loadTickets();
+  });
+  $('title').addEventListener('input',()=>{++detectionGeneration;});
   $('ticket-search').addEventListener('input',()=>{ clearTimeout(searchTimer); ++pickerGeneration; searchTimer=setTimeout(()=>loadTickets(),300); });
   $('ticket-more').addEventListener('click',event=>{if(event.isTrusted)loadTickets(false);});
   $('picker-cancel').addEventListener('click',()=>{++pickerGeneration;clearTimeout(searchTimer);$('ticket-picker').close();});
   $('picker-settings').addEventListener('click',event=>{if(event.isTrusted)sendMessage({type:'openSettings'}).catch(error=>notify(error.message));});
   $('issue-id').addEventListener('input',()=>{
+    ++detectionGeneration;
     if(editorIssue && editorIssue.identifier !== $('issue-id').value.trim().toUpperCase()){editorIssue=null;$('existing-description').value='';}
     syncActionUI();
   });

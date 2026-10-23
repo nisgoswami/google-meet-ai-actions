@@ -12,7 +12,7 @@ files = [
     'LICENSE', 'PRIVACY.md',
     *[f'icons/icon-{size}.png' for size in (16, 32, 48, 128)],
 ]
-destination = root / 'dist' / f'threadport-{manifest["version"]}.zip'
+destination = root / 'dist' / f'google-meet-ai-actions-{manifest["version"]}.zip'
 destination.parent.mkdir(exist_ok=True)
 with ZipFile(destination, 'w', ZIP_DEFLATED) as archive:
     for name in files:

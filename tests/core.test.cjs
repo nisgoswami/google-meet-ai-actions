@@ -53,3 +53,13 @@ test('extracts a plain title without repeating it in the description', () => {
   assert.deepEqual(core.parseTicket(JSON.stringify({title,description:'**'+title+'**\n\n## Summary\nFix header alignment.'})), {title,description:'## Summary\nFix header alignment.'});
   assert.equal(core.withoutRepeatedTitle('## Requirements\n- Keep header alignment work.',title),'## Requirements\n- Keep header alignment work.');
 });
+
+test('detects update references without guessing between multiple tickets',()=>{
+  assert.equal(core.detectUpdate('Revise the issue ENG-42 from this call').issueId,'ENG-42');
+  assert.equal(core.detectUpdate('https://linear.app/example/issue/ENG-42/layout').issueId,'ENG-42');
+  assert.equal(core.detectUpdate('Update the existing ticket with this behavior').updating,true);
+  assert.equal(core.detectUpdate('ENG-42 and ENG-43 need changes').issueId,'');
+  assert.equal(core.detectUpdate('Feature - Add update notifications').updating,false);
+});
+
+test('update detection ignores step numbers outside the configured team',()=>{assert.equal(core.detectUpdate('Feature - Improve step-1 hints','ENG').updating,false);assert.equal(core.detectUpdate('Update ENG-42','ENG').issueId,'ENG-42');});

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Threadport",
-  "version": "1.2.1",
-  "description": "Create and update Linear issues from Google Meet\u2019s Gemini messages. Local text transfer, no extra AI or transcript service.",
+  "name": "Google Meet AI Actions",
+  "version": "1.3.0",
+  "description": "Turn Google Meet Gemini discussions into Linear tickets. Review, assign, set status, and update issues. No separate AI API key.",
   "minimum_chrome_version": "114",
   "permissions": [
     "storage"
@@ -37,11 +37,12 @@
     "128": "icons/icon-128.png"
   },
   "action": {
-    "default_title": "Threadport settings",
+    "default_title": "Google Meet AI Actions settings",
     "default_icon": {
       "16": "icons/icon-16.png",
       "32": "icons/icon-32.png"
     }
   },
-  "options_page": "options.html"
+  "options_page": "options.html",
+  "homepage_url": "https://github.com/nisgoswami/google-meet-ai-actions"
 }

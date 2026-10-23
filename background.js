@@ -46,11 +46,37 @@ function issueIdentifier(value, config) {
 }
 async function readIssue(config, value) {
   const id = issueIdentifier(value, config);
-  const result = await graphql(config.key, 'query($id: String!) { issue(id: $id) { identifier title description createdAt updatedAt url team { id } } }', {id});
+  const result = await graphql(config.key, 'query($id: String!) { issue(id: $id) { identifier title description createdAt updatedAt url state { id name } assignee { id name } team { id } } }', {id});
   const issue = result?.issue;
   if (!validIssue(issue) || issue.identifier !== id || issue.team?.id !== config.teamId) throw new Error('This ticket is not in the configured team.');
-  if ((issue.description || '').length > 50000) throw new Error('This ticket is too large to prepare an update in Threadport.');
-  return {identifier:issue.identifier,title:issue.title,description:issue.description || '',createdAt:issue.createdAt,updatedAt:issue.updatedAt,url:issue.url};
+  if ((issue.description || '').length > 50000) throw new Error('This ticket is too large to prepare an update in Google Meet AI Actions.');
+  return {identifier:issue.identifier,title:issue.title,description:issue.description || '',createdAt:issue.createdAt,updatedAt:issue.updatedAt,url:issue.url,state:issue.state,assignee:issue.assignee};
+}
+
+let teamOptionsCache = null;
+async function teamOptions(config) {
+  if (teamOptionsCache?.teamId===config.teamId && teamOptionsCache?.key===config.key && Date.now()-teamOptionsCache.time<60000) return teamOptionsCache.value;
+  const members = new Map(); let after = null, states = [];
+  do {
+    const data = await graphql(config.key,'query($id: String!, $after: String) { team(id: $id) { id states(first: 100) { nodes { id name type position } } members(first: 100, after: $after) { nodes { id name displayName active } pageInfo { hasNextPage endCursor } } } }',{id:config.teamId,after});
+    const team = data?.team;
+    if (team?.id!==config.teamId || !team.states?.nodes || !team.members?.nodes) throw new Error('Could not load statuses and people for the configured team.');
+    states = team.states.nodes.map(({id,name,type,position})=>({id,name,type,position})).sort((a,b)=>a.position-b.position);
+    for (const member of team.members.nodes) if(member.active!==false) members.set(member.id,{id:member.id,name:member.displayName || member.name});
+    const next = team.members.pageInfo;
+    if (next?.hasNextPage && (!next.endCursor || next.endCursor===after)) throw new Error('Could not load the next page of team members.');
+    after=next?.hasNextPage ? next.endCursor : null;
+  } while(after);
+  const value={states,members:[...members.values()].sort((a,b)=>a.name.localeCompare(b.name))};
+  teamOptionsCache={teamId:config.teamId,key:config.key,time:Date.now(),value};
+  return value;
+}
+async function validateProperties(config, properties) {
+  if (!Object.keys(properties).length) return properties;
+  const options = await teamOptions(config);
+  if (properties.stateId && !options.states.some(state=>state.id===properties.stateId)) throw new Error('Choose a status from your configured team.');
+  if (properties.assigneeId && !options.members.some(member=>member.id===properties.assigneeId)) throw new Error('Choose an active assignee from your configured team.');
+  return properties;
 }
 
 async function handle(message, sender) {
@@ -61,6 +87,19 @@ async function handle(message, sender) {
   if (!isOptions && !isMeet) throw new Error('This action is only available in Meet or extension settings.');
   const { config } = await chrome.storage.local.get('config');
   if (message.type === 'status') return safeConfig(config);
+  if (['getTeamOptions','saveIssueDefaults'].includes(message.type)) {
+    if (!config?.key || !config.teamId) throw new Error('Connect Linear in extension settings first.');
+    const options=await teamOptions(config);
+    if(message.type==='saveIssueDefaults') {
+      if(!isOptions) throw new Error('Defaults can only be saved in extension settings.');
+      const properties={stateId:String(message.stateId||''),assigneeId:message.assigneeId ? String(message.assigneeId) : null};
+      await validateProperties(config,properties);
+      await chrome.storage.local.set({issueDefaults:{teamId:config.teamId,...properties}});
+    }
+    const {issueDefaults}=await chrome.storage.local.get('issueDefaults');
+    return {...options,defaults:issueDefaults?.teamId===config.teamId ? {stateId:issueDefaults.stateId,assigneeId:issueDefaults.assigneeId} : {stateId:options.states.find(state=>state.type==='backlog')?.id || '',assigneeId:null}};
+  }
+
   if (message.type === 'getPrompts') {
     const {prompts} = await chrome.storage.local.get('prompts');
     return {prompts:{...ThreadportPrompts.defaults,...prompts}};
@@ -93,13 +132,21 @@ async function handle(message, sender) {
     return safeConfig(next);
   }
   if (message.type === 'disconnect' && isOptions) {
-    await chrome.storage.local.remove(['config', 'deliveries']);
+    await chrome.storage.local.remove(['config', 'deliveries','issueDefaults']);
     await chrome.storage.session.remove('candidate');
     return {};
   }
-  if (!['create', 'update', 'listIssues', 'getIssue'].includes(message.type) || !isMeet) throw new Error('Unsupported action.');
+  if (!['create', 'update', 'listIssues', 'getIssue','findMatchingIssues'].includes(message.type) || !isMeet) throw new Error('Unsupported action.');
   if (!config?.key || !config.teamId) throw new Error('Connect Linear in extension settings first.');
   if (message.type === 'getIssue') return {issue:await readIssue(config,message.issueId)};
+  if (message.type==='findMatchingIssues') {
+    const title=String(message.title||'').trim();
+    if(!title || title.length>250) return {issues:[]};
+    const data=await graphql(config.key,'query($filter: IssueFilter!) { issues(first: 10, filter: $filter, orderBy: createdAt) { nodes { identifier title createdAt url team { id } } } }',{filter:{team:{id:{eq:config.teamId}},title:{eq:title}}});
+    if(!data?.issues?.nodes || data.issues.nodes.some(issue=>!validIssue(issue)||issue.team?.id!==config.teamId)) throw new Error('Could not check existing tickets in the configured team.');
+    return {issues:data.issues.nodes.map(({identifier,title,createdAt,url})=>({identifier,title,createdAt,url}))};
+  }
+
   if (message.type === 'listIssues') {
     const search = String(message.search || '').trim().slice(0,200);
     const after = typeof message.after === 'string' ? message.after.slice(0,1000) : null;
@@ -121,6 +168,18 @@ async function handle(message, sender) {
   const source = MeetLinearCore.meetingUrl(sender.url);
   if (!source) throw new Error('Open a Google Meet call to send a ticket.');
   const fullDescription = MeetLinearCore.descriptionWithSource(description, source);
+  const properties={};
+  if(typeof message.stateId==='string' && message.stateId) properties.stateId=message.stateId;
+  if(Object.hasOwn(message,'assigneeId')) {
+    if(message.assigneeId!==null && (typeof message.assigneeId!=='string' || !message.assigneeId)) throw new Error('Choose a valid assignee.');
+    properties.assigneeId=message.assigneeId;
+  }
+  if(message.type==='create' && !Object.keys(properties).length) {
+    const {issueDefaults}=await chrome.storage.local.get('issueDefaults');
+    if(issueDefaults?.teamId===config.teamId) {if(issueDefaults.stateId)properties.stateId=issueDefaults.stateId;properties.assigneeId=issueDefaults.assigneeId||null;}
+  }
+  await validateProperties(config,properties);
+
   if (message.type === 'update') {
     const issueId = String(message.issueId || '').trim().toUpperCase();
     if (!/^[A-Z][A-Z0-9_]*-[1-9][0-9]*$/.test(issueId) || issueId.slice(0,issueId.lastIndexOf('-')) !== config.teamKey) throw new Error(`Enter an issue ID from your ${config.teamKey} team, such as ${config.teamKey}-123.`);
@@ -129,7 +188,7 @@ async function handle(message, sender) {
       currentIssue = await readIssue(config,issueId);
       if (currentIssue.updatedAt !== message.expectedUpdatedAt) throw new Error('This ticket changed in Linear after it was selected. Use Ask for update to reload the latest ticket before sending.');
     }
-    const input = {};
+    const input = {...properties};
     if (message.replaceTitle === true) input.title = title;
     if (message.append === true) {
       const existing = currentIssue ? currentIssue.description.trim() : typeof message.existingDescription === 'string' ? message.existingDescription.trim() : '';
@@ -147,7 +206,7 @@ async function handle(message, sender) {
     if (!result?.issueUpdate?.success || !validIssue(result.issueUpdate.issue)) throw new Error('Linear did not confirm the update.');
     return { issue: result.issueUpdate.issue, updated: true };
   }
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify([config.teamId, source, title, description])));
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify([config.teamId, source, title, description, properties])));
   const fingerprint = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
   const { deliveries = {} } = await chrome.storage.local.get('deliveries');
   let delivery = deliveries[fingerprint];
@@ -162,7 +221,7 @@ async function handle(message, sender) {
   try {
     data = await graphql(config.key,
       'mutation($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { identifier url } } }',
-      { input: { id: delivery.id, teamId: config.teamId, title, description: fullDescription } });
+      { input: { id: delivery.id, teamId: config.teamId, title, description: fullDescription, ...properties } });
   } catch (error) {
     // Reuse the same UUID on retries, even across worker restarts. Never make a
     // second ticket if a network failure hid a successful first creation.
