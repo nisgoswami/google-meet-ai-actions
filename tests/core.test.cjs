@@ -45,3 +45,11 @@ test('malformed JSON cannot become a ticket containing raw JSON', () => {
   assert.throws(() => core.parseTicket('{"title": "Feature - Fix bug",'), /Could not read/);
   assert.throws(() => core.parseTicket('{"description":"raw"}'), /separate title/);
 });
+
+test('extracts a plain title without repeating it in the description', () => {
+  const title='Social Engagement Agent - UI Layout and Header Alignment Updates';
+  assert.deepEqual(core.parseTicket(title+'\n\nSummary\nFix header alignment.'), {title,description:'Summary\nFix header alignment.'});
+  assert.deepEqual(core.parseTicket('# '+title+'\n\n'+title+'\n\n## Summary\nFix header alignment.'), {title,description:'## Summary\nFix header alignment.'});
+  assert.deepEqual(core.parseTicket(JSON.stringify({title,description:'**'+title+'**\n\n## Summary\nFix header alignment.'})), {title,description:'## Summary\nFix header alignment.'});
+  assert.equal(core.withoutRepeatedTitle('## Requirements\n- Keep header alignment work.',title),'## Requirements\n- Keep header alignment work.');
+});

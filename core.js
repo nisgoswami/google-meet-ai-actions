@@ -3,6 +3,16 @@
   function clean(text) {
     return String(text || '').replace(/\r\n?/g, '\n').replace(/\u200b/g, '').trim();
   }
+  function withoutRepeatedTitle(description, title) {
+    const normalize = value => clean(value).replace(/^#{1,6}\s*/, '').replace(/^(?:\*\*|__|`)|(?:\*\*|__|`)$/g, '').replace(/\\([\\`*{}_\[\]()#+.!>-])/g, '$1').normalize('NFKC').replace(/\s+/g, ' ').toLowerCase();
+    const expected = normalize(title);
+    const lines = clean(description).split('\n');
+    while (lines.length && normalize(lines[0]) === expected) {
+      lines.shift();
+      while (lines.length && !lines[0].trim()) lines.shift();
+    }
+    return clean(lines.join('\n'));
+  }
   function parseTicket(text) {
     text = clean(text);
     if (!text) throw new Error('Ask Gemini to draft a ticket, or select the text you want to send.');
@@ -15,7 +25,7 @@
         if (typeof obj.title === 'string' && typeof obj.description === 'string') {
           const title = clean(obj.title);
           if (!title || title.length > 250) throw new Error('The ticket title must be 1–250 characters.');
-          const result = { title, description: clean(obj.description) };
+          const result = { title, description: withoutRepeatedTitle(obj.description,title) };
           if (typeof obj.issueId === 'string' && /^[A-Z][A-Z0-9_]*-[1-9][0-9]*$/i.test(obj.issueId.trim())) result.issueId = obj.issueId.trim().toUpperCase();
           return result;
         }
@@ -42,12 +52,13 @@
         description = lines.slice(first + 1).join('\n').trim();
       } else {
         title = lines[first].replace(/^[*\-•]\s+/, '').replace(/^\*\*|\*\*$/g, '').trim();
-        description = text;
+        description = lines.slice(first + 1).join('\n').trim();
       }
     }
     if (!title || title.length > 250) throw new Error('Use Review to give this ticket a short title (up to 250 characters).');
     const issueId = text.match(/^\s*(?:\*\*)?Issue ID:(?:\*\*)?\s*([A-Z][A-Z0-9]*-\d+)\s*$/im)?.[1];
     if (issueId) description = description.replace(/^\s*(?:\*\*)?Issue ID:(?:\*\*)?\s*[A-Z][A-Z0-9_]*-\d+\s*$/im, '').trim();
+    description = withoutRepeatedTitle(description,title);
     return issueId ? { title, description, issueId: issueId.toUpperCase() } : { title, description };
   }
   function meetingUrl(url) {
@@ -60,7 +71,7 @@
     const source = meetingUrl(url);
     return clean(description) + (source ? `\n\n---\nSource: [Google Meet](${source})` : '');
   }
-  const api = { clean, parseTicket, meetingUrl, descriptionWithSource };
+  const api = { clean, withoutRepeatedTitle, parseTicket, meetingUrl, descriptionWithSource };
   root.MeetLinearCore = api;
   if (typeof module !== 'undefined') module.exports = api;
 })(globalThis);

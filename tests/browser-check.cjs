@@ -206,6 +206,14 @@ body{margin:0;background:#161718;color:#eee;font:15px/1.6 Arial}aside{position:a
     await page.getByText('Updated:',{exact:false}).waitFor();
     assert.equal(await worker.evaluate(()=>testRequests.at(-1).variables.id),'ENG-42');
     assert.ok(await worker.evaluate(()=>testReadRequests.filter(r=>r.query.includes('issue(id:')).length>=2));
+    // Live Gemini's title and section headings can be AST spans rather than headings.
+    await answer.locator('.pA4Vnf').evaluate(el=>el.innerHTML='<div><span data-ast-node-id="0">Social Engagement Agent - UI Layout and Header Alignment Updates</span><div><br></div><span data-ast-node-id="1">Summary</span><div><br></div><span data-ast-node-id="2">Fix the alignment.</span><div><br></div><span data-ast-node-id="3">Requirements</span><ul><li><span data-ast-node-id="4">Align the header.</span></li></ul></div>');
+    await answer.getByRole('button',{name:'Review',exact:true}).click();
+    assert.equal(await page.locator('#title').inputValue(),'Social Engagement Agent - UI Layout and Header Alignment Updates');
+    assert.match(await page.locator('#description').inputValue(), /^## Summary/);
+    assert.match(await page.locator('#description').inputValue(), /## Requirements/);
+    assert.doesNotMatch(await page.locator('#description').inputValue(), /Social Engagement Agent/);
+    await page.getByRole('button',{name:'Cancel',exact:true}).click();
     // The key cannot be read by the content script's isolated world.
     assert.deepEqual(errors,[]);
     console.log('PASS: popup before writes, create/replace/append, JSON field separation, Markdown, prompt templates, 320/390px menu-aligned floating layout and footer rerender, duplicate protection, and no scripted sends. No real Linear calls.');
