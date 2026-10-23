@@ -129,7 +129,8 @@ body{margin:0;background:#161718;color:#eee;font:15px/1.6 Arial}aside{position:a
     await composer.fill('Focus on checkout');
     await page.getByRole('button',{name:'Ask for ticket',exact:true}).click();
     assert.match(await composer.innerText(), /Page or Feature Name - Functionality to Improve or Bug to Fix/);
-    assert.match(await composer.innerText(), /valid JSON object/);
+    assert.match(await composer.innerText(), /readable, formatted ticket in Markdown/);
+    assert.match(await composer.innerText(), /Do not output JSON/);
     assert.match(await composer.innerText(), /Focus on checkout/);
     await composer.fill('ENG-42 existing issue text');
     await page.getByRole('button',{name:'Ask for update',exact:true}).click();
@@ -154,6 +155,19 @@ body{margin:0;background:#161718;color:#eee;font:15px/1.6 Arial}aside{position:a
     assert.equal(await page.locator('#title').inputValue(),'Instagram Review - Match native comment previews');
     assert.match(await page.locator('#description').inputValue(), /^## Summary/);
     assert.doesNotMatch(await page.locator('#description').inputValue(), /Description:|Title:/);
+    await page.getByRole('button',{name:'Cancel',exact:true}).click();
+    // Live Gemini JSON is often spans with BR wrappers, not a code block.
+    await answer.locator('.pA4Vnf').evaluate(el => {
+      const draft = {title:'Auto-Selling - Align replies inside cards', description:'## Summary\nAlign cards.\n\n## Requirements\n- Replies stay inside cards.'};
+      el.replaceChildren();
+      for (const line of JSON.stringify(draft, null, 2).split('\n')) {
+        const span = document.createElement('span'); span.textContent = line; el.append(span);
+        const gap = document.createElement('div'); gap.append(document.createElement('br')); el.append(gap);
+      }
+    });
+    await answer.getByRole('button',{name:'Review',exact:true}).click();
+    assert.equal(await page.locator('#title').inputValue(),'Auto-Selling - Align replies inside cards');
+    assert.equal(await page.locator('#description').inputValue(),'## Summary\nAlign cards.\n\n## Requirements\n- Replies stay inside cards.');
     await page.getByRole('button',{name:'Cancel',exact:true}).click();
     // The key cannot be read by the content script's isolated world.
     assert.deepEqual(errors,[]);

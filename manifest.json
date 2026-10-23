@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Threadport",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "Create and update Linear issues from Google Meet\u2019s Gemini messages. Local text transfer, no extra AI or transcript service.",
   "minimum_chrome_version": "114",
   "permissions": [

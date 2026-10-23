@@ -23,7 +23,7 @@ Or ask Gemini: “Draft one Linear ticket from this discussion. Return a short `
 
 Click **Send to Linear** at the bottom right of the message you want to send. It opens a review dialog for that message. Choose **Create a new ticket**, **Replace an existing ticket description**, or **Append to an existing ticket description**, then confirm. No Linear write happens on the first click. The success notice links to the issue. Use **Review** first if you want to edit the title and description.
 
-Preset titles follow `Page or Feature - Improvement or Bug Fix`. Presets request JSON with separate title and Markdown description fields, so field labels do not leak into the body.
+Preset titles follow `Page or Feature - Improvement or Bug Fix`. Presets produce a readable Markdown ticket. The first heading becomes the Linear title; the remaining sections become the description. Field labels and update issue IDs are excluded from the description.
 
 Supports `Title:`/`Description:` labels, Markdown headings, plain text, and JSON containing `title` and `description`. Long titles require review rather than being silently truncated. One message creates one ticket, not a ticket for each bullet.
 

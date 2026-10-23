@@ -19,8 +19,10 @@
           if (typeof obj.issueId === 'string' && /^[A-Z][A-Z0-9_]*-[1-9][0-9]*$/i.test(obj.issueId.trim())) result.issueId = obj.issueId.trim().toUpperCase();
           return result;
         }
+        throw new Error('The JSON ticket needs separate title and description fields.');
       } catch (err) {
         if (!(err instanceof SyntaxError)) throw err;
+        throw new Error('Could not read the JSON ticket. Use Review to enter the title and description separately.');
       }
     }
     // Repair Gemini's occasionally glued field labels before splitting fields.
@@ -45,6 +47,7 @@
     }
     if (!title || title.length > 250) throw new Error('Use Review to give this ticket a short title (up to 250 characters).');
     const issueId = text.match(/^\s*(?:\*\*)?Issue ID:(?:\*\*)?\s*([A-Z][A-Z0-9]*-\d+)\s*$/im)?.[1];
+    if (issueId) description = description.replace(/^\s*(?:\*\*)?Issue ID:(?:\*\*)?\s*[A-Z][A-Z0-9_]*-\d+\s*$/im, '').trim();
     return issueId ? { title, description, issueId: issueId.toUpperCase() } : { title, description };
   }
   function meetingUrl(url) {

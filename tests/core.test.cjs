@@ -35,3 +35,13 @@ test('separates glued description headings and structured JSON update fields', (
   assert.equal(escaped.description, '## Summary\nActual details');
   assert.deepEqual(core.parseTicket(JSON.stringify({title:'Feature - Fix bug',description:'## Summary\nDetails',issueId:'eng-42'})), {title:'Feature - Fix bug',description:'## Summary\nDetails',issueId:'ENG-42'});
 });
+
+test('readable generated tickets split their heading and body into Linear fields', () => {
+  assert.deepEqual(core.parseTicket('# Auto-Selling - Align replies inside cards\n\n## Summary\nKeep elements aligned.\n\n## Requirements\n- Replies stay inside cards.'), {title:'Auto-Selling - Align replies inside cards',description:'## Summary\nKeep elements aligned.\n\n## Requirements\n- Replies stay inside cards.'});
+  assert.deepEqual(core.parseTicket('# Auto-Selling - Align replies inside cards\n\nIssue ID: ENG-42\n\n## Summary\nNew details.'), {title:'Auto-Selling - Align replies inside cards',description:'## Summary\nNew details.',issueId:'ENG-42'});
+});
+
+test('malformed JSON cannot become a ticket containing raw JSON', () => {
+  assert.throws(() => core.parseTicket('{"title": "Feature - Fix bug",'), /Could not read/);
+  assert.throws(() => core.parseTicket('{"description":"raw"}'), /separate title/);
+});
