@@ -17,23 +17,27 @@ Configuration stays in the extension’s local storage in that browser profile. 
 
 ## Create a ticket
 
-Use **Ask for ticket** above the Gemini chatbox to fill an editable prompt with the ticket format, then send it using Gemini. **Ask for update** prepares a replacement description for an existing issue; provide its ID and existing text because the extension does not read Linear. Generated updates open Review before any write.
+Use **Ask for ticket** above the Gemini chatbox to fill an editable prompt with the ticket format, then send it using Gemini. **Ask for update** prepares new details for an existing issue; provide its ID and existing text because the extension does not read Linear. Generated updates open Review before any write.
 
 Or ask Gemini: “Draft one Linear ticket from this discussion. Return a short `Title:` followed by `Description:` with context and acceptance criteria.”
 
-Click **Send to Linear** at the bottom right of the message you want to send. It transfers that message only and creates one issue. The success notice links to the issue. Use **Review** first if you want to edit the title and description.
+Click **Send to Linear** at the bottom right of the message you want to send. It opens a review dialog for that message. Choose **Create a new ticket**, **Replace an existing ticket description**, or **Append to an existing ticket description**, then confirm. No Linear write happens on the first click. The success notice links to the issue. Use **Review** first if you want to edit the title and description.
+
+Preset titles follow `Page or Feature - Improvement or Bug Fix`. Presets request JSON with separate title and Markdown description fields, so field labels do not leak into the body.
 
 Supports `Title:`/`Description:` labels, Markdown headings, plain text, and JSON containing `title` and `description`. Long titles require review rather than being silently truncated. One message creates one ticket, not a ticket for each bullet.
 
 ## Update an issue
 
-Click **Review** on the message. Choose **Update an existing issue**, enter its ID (for example `ENG-123`), and check the fields to replace. **Replace description** is selected by default; **Replace title** is off.
+Click **Review** on the message. Choose **Replace an existing ticket description**, enter its ID (for example `ENG-123`), and check the fields to replace. **Replace description** is selected by default; **Replace title** is off.
+
+**Append** keeps the existing title and adds new details after the existing description. With the minimal issue-only key, paste the latest existing description into the append field; it is not fetched. Reusing an outdated copy can overwrite concurrent edits. Choosing Replace supports an empty existing description.
 
 Unchecked fields are preserved. The extension does not read or merge the existing issue. A replacement description includes the current Meet link. Issue IDs must match your configured team prefix; the team-scoped API key enforces access at Linear as well.
 
 ## Data handling
 
-Only the chosen title, description, existing issue ID (for updates), and canonical Meet call link are sent directly to `https://api.linear.app/graphql`, when you click Send/Create/Update.
+Only the chosen title, description (including the supplied existing text for append), existing issue ID (for updates), and canonical Meet call link are sent directly to `https://api.linear.app/graphql`, when you click Send/Create/Update.
 
 - No extra model calls, audio recording, caption capture, analytics, cookies, clipboard permission, remote scripts, or intermediary uploads.
 - API key is in extension-local storage restricted to trusted extension contexts. It is never synced or returned to content scripts.

@@ -13,7 +13,7 @@ const contentPath=path.join(extensionPath,'content.js');
 fs.writeFileSync(contentPath,fs.readFileSync(contentPath,'utf8').replaceAll("mode: 'closed'","mode: 'open'"));
 const fixture = `<!doctype html><html><head><meta charset="utf-8"><style>
 body{margin:0;background:#161718;color:#eee;font:15px/1.6 Arial}aside{position:absolute;left:12px;top:12px;width:390px;height:730px;background:#202124;padding:16px;box-sizing:border-box}header{font-size:20px} .bubble{margin:20px 0 16px 80px;background:#303134;border-radius:12px;padding:14px;font-weight:400} .pA4Vnf{margin:16px 0 4px;white-space:pre-line}footer{position:absolute;bottom:16px;left:16px;right:16px;background:#141414;border-radius:10px;padding:16px}[contenteditable]{min-height:40px}.messages{max-height:510px;overflow:auto}.copy{color:#aaa;margin-top:12px}
-</style></head><body><aside data-feed-title="A meeting conversation" data-msl-viewport="true"><header>Gemini</header><div class="messages" role="list"><div role="listitem"><div class="bubble" role="heading"><span jsname="DPm3Gf">Draft a ticket for fixing checkout retries.</span></div></div><div role="listitem" data-generation-index="1"><div class="pA4Vnf">Title: Fix checkout retries\n\nDescription: Retry failed payments once.\n\nAcceptance criteria:\n- No duplicate charges.</div><div class="copy">Copy · Report</div></div></div><footer><div contenteditable="true" aria-label="Ask Gemini" role="combobox">Ask Gemini</div></footer></aside></body></html>`;
+</style></head><body><aside data-feed-title="A meeting conversation" data-msl-viewport="true"><header>Gemini</header><div class="messages" role="list"><div role="listitem"><div class="bubble" role="heading"><span jsname="DPm3Gf">Draft a ticket for fixing checkout retries.</span></div></div><div role="listitem" data-generation-index="1"><div class="pA4Vnf">Title: Checkout - Fix payment retries\n\nDescription: Retry failed payments once.\n\nAcceptance criteria:\n- No duplicate charges.</div><div class="copy">Copy · Report</div></div></div><div class="suggestions"><button>Summarize the discussion so far</button><button>What was discussed in the last two minutes?</button></div><footer><div contenteditable="true" aria-label="Ask Gemini" role="combobox">Ask Gemini</div></footer></aside></body></html>`;
 (async()=>{
   const context = await chromium.launchPersistentContext(profile, {
     executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium', headless:true,
@@ -53,18 +53,33 @@ body{margin:0;background:#161718;color:#eee;font:15px/1.6 Arial}aside{position:a
     const answer=page.locator('[data-generation-index="1"]');
     await answer.getByRole('button',{name:'Send to Linear ↗',exact:true}).waitFor();
     assert.equal(await page.getByRole('button',{name:'Send to Linear ↗',exact:true}).count(),2); // two message controls; global fallback is hidden
+    for (const width of [390, 320]) {
+      await page.locator('aside').evaluate((el, width) => el.style.width = width + 'px', width);
+      const prompts = await page.locator('#threadport-prompts').boundingBox();
+      const inputBox = await page.locator('[aria-label="Ask Gemini"]').boundingBox();
+      const suggestions = await page.locator('.suggestions').boundingBox();
+      assert.ok(prompts.y >= suggestions.y + suggestions.height, 'Prompt row must follow native suggestions');
+      assert.ok(prompts.y + prompts.height <= inputBox.y, 'Prompt row must not cover the composer');
+      assert.equal(await page.locator('#threadport-prompts').evaluate(el => getComputedStyle(el).position), 'static');
+    }
+    await page.locator('aside').evaluate(el => el.style.width = '390px');
     await page.screenshot({path:path.join(sourcePath,'preview.png')});
     // Scripted events must never send user data.
     await answer.getByRole('button',{name:'Send to Linear ↗',exact:true}).evaluate(el=>el.click());
     assert.equal(await worker.evaluate(()=>testRequests.length),0);
     await answer.getByRole('button',{name:'Send to Linear ↗',exact:true}).click();
+    assert.equal(await worker.evaluate(()=>testRequests.length),0);
+    await page.locator('#mode').selectOption('create');
+    await page.getByRole('button',{name:'Create ticket ↗',exact:true}).click();
     await page.getByText('Created:',{exact:false}).waitFor();
     let requests=await worker.evaluate(()=>testRequests);
     assert.equal(requests.length,1);
-    assert.equal(requests[0].variables.input.title,'Fix checkout retries');
+    assert.equal(requests[0].variables.input.title,'Checkout - Fix payment retries');
     assert.match(requests[0].variables.input.description,/No duplicate charges/);
     assert.doesNotMatch(requests[0].variables.input.description,/Draft a ticket/);
     await answer.getByRole('button',{name:'Send to Linear ↗',exact:true}).click();
+    await page.locator('#mode').selectOption('create');
+    await page.getByRole('button',{name:'Create ticket ↗',exact:true}).click();
     await page.getByText('Already sent:',{exact:false}).waitFor();
     assert.equal(await worker.evaluate(()=>testRequests.length),1);
     await answer.getByRole('button',{name:'Review',exact:true}).click();
@@ -72,7 +87,7 @@ body{margin:0;background:#161718;color:#eee;font:15px/1.6 Arial}aside{position:a
     await page.locator('#issue-id').fill('ENG-42');
     await page.locator('#description').fill('Revised acceptance criteria.');
     await page.screenshot({path:path.join(sourcePath,'preview-review.png')});
-    await page.getByRole('button',{name:'Update issue ↗',exact:true}).click();
+    await page.getByRole('button',{name:'Replace selected fields ↗',exact:true}).click();
     await page.getByText('Updated:',{exact:false}).waitFor();
     requests=await worker.evaluate(()=>testRequests);
     assert.equal(requests[1].variables.id,'ENG-42');
@@ -103,15 +118,35 @@ body{margin:0;background:#161718;color:#eee;font:15px/1.6 Arial}aside{position:a
     const composer = page.locator('[aria-label="Ask Gemini"]');
     await composer.fill('Focus on checkout');
     await page.getByRole('button',{name:'Ask for ticket',exact:true}).click();
-    assert.match(await composer.innerText(), /Title: A concise/);
+    assert.match(await composer.innerText(), /Page or Feature Name - Functionality to Improve or Bug to Fix/);
+    assert.match(await composer.innerText(), /valid JSON object/);
     assert.match(await composer.innerText(), /Focus on checkout/);
     await composer.fill('ENG-42 existing issue text');
     await page.getByRole('button',{name:'Ask for update',exact:true}).click();
-    assert.match(await composer.innerText(), /complete replacement description/);
+    assert.match(await composer.innerText(), /replace the description or append/);
     assert.match(await composer.innerText(), /ENG-42 existing issue text/);
     assert.equal(await worker.evaluate(()=>testRequests.length), 2);
+    // Append combines the explicit current body with the new details, keeping the title.
+    await answer.getByRole('button',{name:'Send to Linear ↗',exact:true}).click();
+    await page.locator('#mode').selectOption('append');
+    await page.locator('#issue-id').fill('ENG-42');
+    await page.locator('#existing-description').fill('## Existing requirements\n- Keep this requirement.');
+    await page.getByRole('button',{name:'Append to ticket ↗',exact:true}).click();
+    await page.getByText('Updated:',{exact:false}).waitFor();
+    requests = await worker.evaluate(()=>testRequests);
+    assert.equal(requests.length, 3);
+    assert.match(requests[2].variables.input.description, /^## Existing requirements/);
+    assert.match(requests[2].variables.input.description, /Updated requirements/);
+    assert.equal(requests[2].variables.input.title, undefined);
+    // JSON output goes into the correct fields without literal field labels.
+    await answer.locator('.pA4Vnf').evaluate(el => { el.innerHTML = '<pre><code class="language-json"></code></pre>'; el.querySelector('code').textContent = JSON.stringify({title:'Instagram Review - Match native comment previews', description:'## Summary\nImprove preview fidelity.\n\n## Acceptance criteria\n- Matches the native layout.'}); });
+    await answer.getByRole('button',{name:'Send to Linear ↗',exact:true}).click();
+    assert.equal(await page.locator('#title').inputValue(),'Instagram Review - Match native comment previews');
+    assert.match(await page.locator('#description').inputValue(), /^## Summary/);
+    assert.doesNotMatch(await page.locator('#description').inputValue(), /Description:|Title:/);
+    await page.getByRole('button',{name:'Cancel',exact:true}).click();
     // The key cannot be read by the content script's isolated world.
     assert.deepEqual(errors,[]);
-    console.log('PASS: real extension load, settings, per-message controls, create, duplicate protection, update, rerender, and no scripted sends. No real Linear calls.');
+    console.log('PASS: popup before writes, create/replace/append, JSON field separation, Markdown, prompt templates, 320/390px non-overlapping layout, duplicate protection, and no scripted sends. No real Linear calls.');
   } finally { await context.close(); fs.rmSync(profile,{recursive:true,force:true}); }
 })().catch(error=>{console.error(error);process.exitCode=1;});

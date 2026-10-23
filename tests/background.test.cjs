@@ -86,3 +86,16 @@ test('rejects cross-team updates and empty replacement descriptions',async()=>{
   assert.equal((await h.call({type:'update',issueId:'ENG-1',replaceDescription:true,ticket:{title:'',description:''}})).ok,false);
   assert.equal(h.calls.length,0);
 });
+
+test('appends to the supplied current description without broader permissions', async () => {
+  const h=harness(async()=>({ok:true,status:200,json:async()=>({data:{issueUpdate:{success:true,issue:{identifier:'ENG-12',url:'https://linear.app/example/issue/ENG-12'}}}})}));
+  const response=await h.call({type:'update',issueId:'ENG-12',append:true,replaceDescription:true,ticket,existingDescription:'## Existing\n- Preserve this'});
+  assert.equal(response.updated,true);
+  const body=JSON.parse(h.calls[0].body);
+  assert.match(body.variables.input.description,/^## Existing\n- Preserve this\n\n---\n\nRetry payment/);
+  assert.equal(body.variables.input.title,undefined);
+  assert.equal(h.calls.length,1);
+  assert.ok(body.query.startsWith('mutation'));
+  assert.equal((await h.call({type:'update',issueId:'ENG-12',append:true,replaceDescription:true,ticket})).ok,false);
+  assert.equal(h.calls.length,1);
+});

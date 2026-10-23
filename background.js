@@ -82,7 +82,14 @@ async function handle(message, sender) {
     if (!/^[A-Z][A-Z0-9_]*-[1-9][0-9]*$/.test(issueId) || issueId.slice(0,issueId.lastIndexOf('-')) !== config.teamKey) throw new Error(`Enter an issue ID from your ${config.teamKey} team, such as ${config.teamKey}-123.`);
     const input = {};
     if (message.replaceTitle === true) input.title = title;
-    if (message.replaceDescription === true) input.description = fullDescription;
+    if (message.append === true) {
+      const existing = typeof message.existingDescription === 'string' ? message.existingDescription.trim() : '';
+      if (!existing) throw new Error('Paste the current ticket description before appending. Choose Replace if it is empty.');
+      if (!description) throw new Error('Add the details to append.');
+      input.description = existing + '\n\n---\n\n' + fullDescription;
+      if (input.description.length > 50000) throw new Error('The combined description exceeds 50,000 characters.');
+      delete input.title; // Append always preserves the existing title.
+    } else if (message.replaceDescription === true) input.description = fullDescription;
     if (!Object.keys(input).length) throw new Error('Choose a field to update.');
     if (message.replaceDescription === true && !description) throw new Error('Add a replacement description first.');
     const result = await graphql(config.key,

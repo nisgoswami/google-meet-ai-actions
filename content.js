@@ -22,7 +22,6 @@
       label {display:block;margin:16px 0 6px;font-weight:600} input,textarea,select {width:100%;font:14px/1.5 Arial,sans-serif;padding:10px;background:#151619;color:#eee;border:1px solid #5f6368;border-radius:7px} textarea {min-height:200px;resize:vertical} input[type=checkbox] {width:auto;margin-right:8px} .fields label {margin:8px 0;font-weight:400}
       .actions {display:flex;gap:8px;justify-content:flex-end;margin-top:18px}.hint {font-size:12px;color:#bdc1c6}.error {color:#f2b8b5}
     </style>
-    <div class="prompts" aria-label="Gemini ticket prompts"><button id="ask-ticket" title="Prepare a ticket prompt in Ask Gemini">Ask for ticket</button><button id="ask-update" title="Prepare an issue update prompt in Ask Gemini">Ask for update</button></div>
     <div class="bar" id="bar" aria-label="Meet to Linear">
       <button class="primary" id="send" title="Send selected text or the latest Gemini answer to Linear">Send to Linear ↗</button>
       <button id="review" title="Review or paste a ticket before sending">Review</button>
@@ -31,19 +30,25 @@
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
     <dialog id="editor" aria-labelledby="editor-title">
       <h2 id="editor-title">Send to Linear</h2><p id="destination">One ticket from the text you choose.</p>
-      <label for="mode">Action</label><select id="mode"><option value="create">Create a new issue</option><option value="update">Update an existing issue</option></select>
+      <label for="mode">Action</label><select id="mode"><option value="" disabled>Choose an action</option><option value="create">Create a new ticket</option><option value="update">Replace an existing ticket description</option><option value="append">Append to an existing ticket description</option></select>
       <div id="update-fields" hidden>
         <label for="issue-id">Existing issue ID</label><input id="issue-id" placeholder="ENG-123" autocomplete="off" spellcheck="false">
         <div class="fields"><label><input id="replace-title" type="checkbox">Replace title</label><label><input id="replace-description" type="checkbox" checked>Replace description</label></div>
-        <p class="hint">Only checked fields are replaced. Existing text is not loaded or merged.</p>
+        <p class="hint" id="update-hint">Only checked fields are replaced.</p>
+        <div id="append-fields" hidden><label for="existing-description">Current ticket description</label><textarea id="existing-description" placeholder="Paste the current description from Linear"></textarea><p class="hint">Paste the latest description to preserve it. Appending keeps your API key permissions unchanged. For an empty description, choose Replace.</p></div>
       </div>
-      <label for="title">Title</label><input id="title" maxlength="250" autocomplete="off">
+      <label for="title">Title</label><input id="title" maxlength="250" autocomplete="off" placeholder="Page or Feature - Improvement or Bug Fix"><p class="hint">Example: Instagram Review - Match comment previews to Instagram</p>
       <label for="description">Description</label><textarea id="description" maxlength="50000" placeholder="Paste or edit the ticket details…"></textarea>
       <p class="hint">Your Meet link is included. Only these fields go to Linear.</p>
       <div id="editor-status" role="status" aria-live="polite"></div>
       <div class="actions"><button id="cancel">Cancel</button><button class="primary" id="create">Create ticket ↗</button></div>
     </dialog>`;
-  const $ = id => shadow.getElementById(id);
+  const promptHost = document.createElement('div');
+  promptHost.id = 'threadport-prompts';
+  promptHost.style.cssText = 'display:block;position:static;flex:0 0 auto;width:100%;box-sizing:border-box;padding:0 8px 8px;';
+  const promptShadow = promptHost.attachShadow({ mode: 'closed' });
+  promptShadow.innerHTML = `<style>:host{color-scheme:dark}.prompts{display:flex;flex-wrap:wrap;align-items:center;gap:8px}button{font:500 12px/1.3 Arial,sans-serif;white-space:nowrap;padding:8px 12px;border:1px solid #55565d;border-radius:18px;background:#202124;color:#dadce0;cursor:pointer}button:hover{background:#3c4043}button:focus-visible{outline:2px solid #c4b5fd;outline-offset:2px}</style><div class="prompts" aria-label="Gemini ticket prompts"><button id="ask-ticket" title="Prepare a ticket prompt in Ask Gemini">Ask for ticket</button><button id="ask-update" title="Prepare an issue update prompt in Ask Gemini">Ask for update</button></div>`;
+  const $ = id => shadow.getElementById(id) || promptShadow.getElementById(id);
   const buttons = [$('send'), $('create')];
   let input, panel, busy = false, captured = '', config = null, toastTimer, pendingIntent = 'create';
   const updateResponses = new WeakSet();
@@ -122,10 +127,10 @@
     $('title').value = draft.title;
     $('description').value = draft.description;
     const updating = Boolean(draft.issueId) || intent === 'update';
-    $('mode').value = updating ? 'update' : 'create';
-    $('update-fields').hidden = !updating;
+    $('mode').value = updating ? 'update' : '';
+    $('existing-description').value = '';
+    syncActionUI();
     $('issue-id').value = draft.issueId || '';
-    $('create').textContent = updating ? 'Update issue ↗' : 'Create ticket ↗';
     $('replace-title').checked = false;
     $('replace-description').checked = true;
     $('editor-status').textContent = '';
@@ -150,6 +155,7 @@
     } finally {
       busy = false;
       buttons.forEach(button => button.disabled = false);
+      syncActionUI();
     }
   }
   async function sendText(text, intent = 'create') {
@@ -157,11 +163,7 @@
     try {
       if (!(await status()).connected) return void await sendMessage({ type: 'openSettings' });
       if (!text) { showEditor(''); notify('Select Gemini’s ticket text, or paste it into Review.'); return; }
-      let draft;
-      try { draft = parseTicket(text); }
-      catch { showEditor(text); notify('Add a short title before sending.'); return; }
-      if (draft.issueId || intent === 'update') { showEditor(text, 'update'); return; }
-      await create(draft);
+      showEditor(text, intent);
     } catch (error) { notify(error.message); }
   }
   function updateMessageButtons() {
@@ -222,20 +224,32 @@
     if (event.isTrusted) sendMessage({ type: 'openSettings' }).catch(error => notify(error.message));
   });
   $('cancel').addEventListener('click', () => { if (!busy) $('editor').close(); });
-  $('mode').addEventListener('change', () => {
-    const updating = $('mode').value === 'update';
+  function syncActionUI() {
+    const mode = $('mode').value;
+    const updating = mode === 'update' || mode === 'append';
     $('update-fields').hidden = !updating;
-    $('create').textContent = updating ? 'Update issue ↗' : 'Create ticket ↗';
-    if (updating) $('issue-id').focus();
+    $('append-fields').hidden = mode !== 'append';
+    $('replace-title').disabled = mode === 'append';
+    $('replace-description').disabled = mode === 'append';
+    if (mode === 'append') { $('replace-title').checked = false; $('replace-description').checked = true; }
+    $('update-hint').textContent = mode === 'append' ? 'Existing title is kept. New details are added after the current description.' : 'Only checked fields are replaced. Existing text is not fetched.';
+    $('create').textContent = mode === 'append' ? 'Append to ticket ↗' : mode === 'update' ? 'Replace selected fields ↗' : mode === 'create' ? 'Create ticket ↗' : 'Choose an action';
+    $('create').disabled = !mode || busy;
+  }
+  $('mode').addEventListener('change', () => {
+    syncActionUI();
+    if ($('mode').value !== 'create') $('issue-id').focus();
   });
   $('editor').addEventListener('cancel', event => { if (busy) event.preventDefault(); });
   $('create').addEventListener('click', event => {
     if (!event.isTrusted || busy) return;
-    const updating = $('mode').value === 'update';
+    const mode = $('mode').value;
+    if (!mode) return;
+    const updating = mode !== 'create';
     if (!updating || $('replace-title').checked) {
-      if (!$('title').value.trim()) { $('title').focus(); $('editor-status').textContent = 'Add a title first.'; return; }
+      if (!/^.+ - .+$/.test($('title').value.trim())) { $('title').focus(); $('editor-status').textContent = 'Use Page or Feature - Improvement or Bug Fix for the title.'; return; }
     }
-    const update = updating ? { issueId: $('issue-id').value, replaceTitle: $('replace-title').checked, replaceDescription: $('replace-description').checked } : null;
+    const update = updating ? { issueId: $('issue-id').value, replaceTitle: $('replace-title').checked, replaceDescription: $('replace-description').checked, append: mode === 'append', existingDescription: $('existing-description').value } : null;
     create({ title: $('title').value.trim(), description: $('description').value.trim() }, update);
   });
 
@@ -245,9 +259,14 @@
     const context = clean(input.innerText || input.value);
     const prefix = config?.teamKey || 'ENG';
     const task = updating
-      ? `Draft an update for one existing Linear issue using this meeting discussion and any issue text I provide. Ask me for the issue ID and existing description if missing. Do not claim you can read Linear. Return a complete replacement description that preserves the supplied existing requirements and incorporates the discussed changes. Start with "Issue ID: ${prefix}-123" using the actual ID, followed by the title and description format below.`
-      : 'Draft one actionable Linear ticket from this meeting discussion. Use only information discussed; flag unknowns rather than inventing details.';
-    const prompt = `${task}\n\nReturn only this format, with Markdown formatting in the description:\nTitle: A concise, specific title\nDescription:\n## Context\nRelevant background\n\n## Requirements\n- Concrete work to do\n\n## Acceptance criteria\n- Verifiable outcome\n\nOmit sections with no relevant information. Do not repeat the title in the description. Do not wrap the response in a code block.${context ? `\n\nMy instructions or existing issue text:\n${context}` : ''}`;
+      ? `Draft updated details for one existing Linear issue from this meeting. Ask for its actual issue ID if missing; never invent one. Do not claim to read Linear. Include an "issueId" property in your output with the actual ID (for example ${prefix}-123). The user will choose whether to replace the description or append the new details.`
+      : 'Draft one actionable Linear ticket from this meeting. Use only discussed facts and mark unknowns as open questions.';
+    const format = {
+      title: 'Page or Feature Name - Functionality to Improve or Bug to Fix',
+      description: '## Summary\nOne concise paragraph explaining the change and why.\n\n## Requirements\n- Specific work to do\n\n## Acceptance criteria\n- Observable, testable outcome'
+    };
+    const prompt = `${task}\n\nThe title MUST always be "Page or Feature Name - Functionality to Improve or Bug to Fix", using a plain hyphen with spaces. Example: "Instagram Review - Match comment previews to Instagram". Name the real page or feature and use a specific improvement or bug fix, not these placeholders.\n\nReturn ONLY a valid JSON object with separate "title" and "description" fields${updating ? ' and "issueId"' : ''}. Use escaped newline characters inside the JSON description. The description must contain clean Markdown with separate paragraphs, headings, and bullet lists. Do not put "Title:", "Description:", or the ticket title inside the description. Use Summary, Requirements, and Acceptance criteria. For bugs, include Steps to reproduce, Expected behavior, and Actual behavior only when discussed. Omit empty sections and placeholders. Never concatenate labels and headings such as "Description:## Context". No commentary outside the JSON.\n\nExample structure:\n${JSON.stringify(format, null, 2)}${context ? `\n\nMy instructions or existing issue text:\n${context}` : ''}`;
+
     input.focus();
     if (input.matches('textarea,input')) {
       const setter = Object.getOwnPropertyDescriptor(input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, 'value').set;
@@ -270,8 +289,11 @@
     updateMessageButtons();
     if (!input || !panel || !visible(panel)) {
       host.style.display = 'none';
+      promptHost.remove();
       return;
     }
+    const promptContainer = adapter.promptContainer(input);
+    if (promptContainer && promptHost.parentElement !== promptContainer) promptContainer.prepend(promptHost);
     if (!host.isConnected) document.documentElement.append(host);
     const box = (input.closest('footer') || input.parentElement).getBoundingClientRect();
     const inputBox = input.getBoundingClientRect();
@@ -280,7 +302,7 @@
     host.style.width = `${width}px`;
     host.style.left = `${Math.max(8, Math.min(innerWidth - width - 8, inputBox.left))}px`;
     // Above the composer: never cover Gemini's native send button or editor.
-    host.style.top = `${Math.max(8, box.top - ($('bar').hidden ? 40 : 88))}px`;
+    host.style.top = `${Math.max(8, box.top - 52)}px`;
   }
   let queued = false;
   function schedule() {

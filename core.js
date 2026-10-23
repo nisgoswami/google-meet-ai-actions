@@ -15,12 +15,16 @@
         if (typeof obj.title === 'string' && typeof obj.description === 'string') {
           const title = clean(obj.title);
           if (!title || title.length > 250) throw new Error('The ticket title must be 1–250 characters.');
-          return { title, description: clean(obj.description) };
+          const result = { title, description: clean(obj.description) };
+          if (typeof obj.issueId === 'string' && /^[A-Z][A-Z0-9_]*-[1-9][0-9]*$/i.test(obj.issueId.trim())) result.issueId = obj.issueId.trim().toUpperCase();
+          return result;
         }
       } catch (err) {
         if (!(err instanceof SyntaxError)) throw err;
       }
     }
+    // Repair Gemini's occasionally glued field labels before splitting fields.
+    text = text.replace(/(Description\s*:)\s*(?:\\#){1,6}\s*/gi, '$1\n## ').replace(/(Description\s*:)\s*(#{1,6})\s*/gi, '$1\n$2 ');
     const lines = text.split('\n');
     const titleLine = lines.findIndex(line => /^(?:#{1,6}\s*)?(?:\*\*)?(?:ticket\s+)?title(?:\*\*)?\s*:/i.test(line.trim()));
     let title, description;

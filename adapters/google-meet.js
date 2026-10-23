@@ -7,6 +7,7 @@
     input(doc = document) {
       return Array.from(doc.querySelectorAll('[aria-label="Ask Gemini"][contenteditable="true"],textarea[aria-label="Ask Gemini"]')).find(visible);
     },
+    promptContainer(input) { return input?.closest('footer'); },
     panel(input) { return input?.closest('[data-feed-title]'); },
     cards(panel) {
       return panel ? Array.from(panel.querySelectorAll('[role="listitem"]')).filter(card => this.textElement(card)) : [];
