@@ -1,7 +1,7 @@
 {
   "name": "threadport",
   "private": true,
-  "version": "1.1.2",
+  "version": "1.2.0",
   "description": "Transfer conversation text into work items. Google Meet and Linear first.",
   "license": "MIT",
   "scripts": {

@@ -1,4 +1,5 @@
 import './core.js';
+import './prompts.js';
 
 const trustedStorage = chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
 const API = 'https://api.linear.app/graphql';
@@ -25,7 +26,7 @@ async function graphql(key, query, variables = {}) {
   try { body = await response.json(); } catch { throw new Error('Linear returned an unreadable response. Retry the same ticket to check its status.'); }
   if (body.errors?.length) {
     // Keep remote messages out of the page; do not echo request contents or keys.
-    throw new Error('Linear rejected the request. Check the API key, team access, and ticket fields.');
+    throw new Error(query.trim().startsWith('query') ? 'Could not read Linear tickets. The picker needs Read permission on the same team, in addition to Create issues. Check the key in extension settings.' : 'Linear rejected the request. Check the API key, team access, and ticket fields.');
   }
   return body.data;
 }
@@ -38,6 +39,20 @@ function validIssue(issue) {
   return issue && typeof issue.identifier === 'string' && typeof issue.url === 'string' && issue.url.startsWith('https://linear.app/');
 }
 
+function issueIdentifier(value, config) {
+  const id = String(value || '').trim().toUpperCase();
+  if (!/^[A-Z][A-Z0-9_]*-[1-9][0-9]*$/.test(id) || id.slice(0,id.lastIndexOf('-')) !== config.teamKey) throw new Error(`Choose an issue from the ${config.teamKey} team.`);
+  return id;
+}
+async function readIssue(config, value) {
+  const id = issueIdentifier(value, config);
+  const result = await graphql(config.key, 'query($id: String!) { issue(id: $id) { identifier title description createdAt updatedAt url team { id } } }', {id});
+  const issue = result?.issue;
+  if (!validIssue(issue) || issue.identifier !== id || issue.team?.id !== config.teamId) throw new Error('This ticket is not in the configured team.');
+  if ((issue.description || '').length > 50000) throw new Error('This ticket is too large to prepare an update in Threadport.');
+  return {identifier:issue.identifier,title:issue.title,description:issue.description || '',createdAt:issue.createdAt,updatedAt:issue.updatedAt,url:issue.url};
+}
+
 async function handle(message, sender) {
   await trustedStorage;
   const isOptions = sender.url === chrome.runtime.getURL('options.html') && !sender.tab?.url?.startsWith('https://meet.google.com/');
@@ -46,6 +61,21 @@ async function handle(message, sender) {
   if (!isOptions && !isMeet) throw new Error('This action is only available in Meet or extension settings.');
   const { config } = await chrome.storage.local.get('config');
   if (message.type === 'status') return safeConfig(config);
+  if (message.type === 'getPrompts') {
+    const {prompts} = await chrome.storage.local.get('prompts');
+    return {prompts:{...ThreadportPrompts.defaults,...prompts}};
+  }
+  if (message.type === 'savePrompts' && isOptions) {
+    const prompts = {};
+    for (const name of ['create','update']) {
+      const value = message.prompts?.[name];
+      if (typeof value !== 'string' || !value.trim() || value.length > 12000) throw new Error('Each prompt must contain 1 to 12,000 characters.');
+      prompts[name] = value.trim();
+    }
+    await chrome.storage.local.set({prompts});
+    return {};
+  }
+
   if (message.type === 'openSettings' && isMeet) {
     await chrome.runtime.openOptionsPage();
     return {};
@@ -67,8 +97,22 @@ async function handle(message, sender) {
     await chrome.storage.session.remove('candidate');
     return {};
   }
-  if (!['create', 'update'].includes(message.type) || !isMeet) throw new Error('Unsupported action.');
+  if (!['create', 'update', 'listIssues', 'getIssue'].includes(message.type) || !isMeet) throw new Error('Unsupported action.');
   if (!config?.key || !config.teamId) throw new Error('Connect Linear in extension settings first.');
+  if (message.type === 'getIssue') return {issue:await readIssue(config,message.issueId)};
+  if (message.type === 'listIssues') {
+    const search = String(message.search || '').trim().slice(0,200);
+    const after = typeof message.after === 'string' ? message.after.slice(0,1000) : null;
+    const filter = {team:{id:{eq:config.teamId}}};
+    if (/^[A-Z][A-Z0-9_]*-[1-9][0-9]*$/i.test(search)) {
+      issueIdentifier(search,config);
+      filter.number = {eq:Number(search.slice(search.lastIndexOf('-')+1))};
+    } else if (search) filter.or = [{title:{containsIgnoreCase:search}},{description:{containsIgnoreCase:search}}];
+    const data = await graphql(config.key,'query($filter: IssueFilter!, $after: String) { issues(first: 25, after: $after, filter: $filter, orderBy: createdAt) { nodes { identifier title createdAt updatedAt url team { id } } pageInfo { hasNextPage endCursor } } }',{filter,after});
+    if (!data?.issues?.nodes || data.issues.nodes.some(issue=>!validIssue(issue) || issue.team?.id!==config.teamId)) throw new Error('Linear returned tickets outside the configured team.');
+    return {issues:data.issues.nodes.map(({identifier,title,createdAt,updatedAt,url})=>({identifier,title,createdAt,updatedAt,url})).sort((a,b)=>Date.parse(b.createdAt)-Date.parse(a.createdAt)),pageInfo:data.issues.pageInfo};
+  }
+
   const title = String(message.ticket?.title || '').trim();
   const description = String(message.ticket?.description || '').trim();
   if ((message.type === 'create' || message.replaceTitle === true) && !title) throw new Error('Add a title first.');
@@ -80,13 +124,18 @@ async function handle(message, sender) {
   if (message.type === 'update') {
     const issueId = String(message.issueId || '').trim().toUpperCase();
     if (!/^[A-Z][A-Z0-9_]*-[1-9][0-9]*$/.test(issueId) || issueId.slice(0,issueId.lastIndexOf('-')) !== config.teamKey) throw new Error(`Enter an issue ID from your ${config.teamKey} team, such as ${config.teamKey}-123.`);
+    let currentIssue = null;
+    if (message.expectedUpdatedAt) {
+      currentIssue = await readIssue(config,issueId);
+      if (currentIssue.updatedAt !== message.expectedUpdatedAt) throw new Error('This ticket changed in Linear after it was selected. Use Ask for update to reload the latest ticket before sending.');
+    }
     const input = {};
     if (message.replaceTitle === true) input.title = title;
     if (message.append === true) {
-      const existing = typeof message.existingDescription === 'string' ? message.existingDescription.trim() : '';
-      if (!existing) throw new Error('Paste the current ticket description before appending. Choose Replace if it is empty.');
+      const existing = currentIssue ? currentIssue.description.trim() : typeof message.existingDescription === 'string' ? message.existingDescription.trim() : '';
+      if (!existing && !currentIssue) throw new Error('Paste the current ticket description before appending. Choose Replace if it is empty.');
       if (!description) throw new Error('Add the details to append.');
-      input.description = existing + '\n\n---\n\n' + fullDescription;
+      input.description = existing ? existing + '\n\n---\n\n' + fullDescription : fullDescription;
       if (input.description.length > 50000) throw new Error('The combined description exceeds 50,000 characters.');
       delete input.title; // Append always preserves the existing title.
     } else if (message.replaceDescription === true) input.description = fullDescription;

@@ -4,6 +4,7 @@ const vm = require('node:vm');
 const fs = require('node:fs');
 const crypto = require('node:crypto').webcrypto;
 const core = require('../core.js');
+const prompts = require('../prompts.js');
 
 function harness(fetchImpl) {
   const data = { config: {key:'lin_api_TEST',teamId:'fixed-team',teamName:'Engineering',teamKey:'ENG',workspaceName:'Example'} };
@@ -22,9 +23,9 @@ function harness(fetchImpl) {
       action: {onClicked:{addListener:()=>{}}}
     },
     fetch: async (url, options) => { calls.push({url,...options});return fetchImpl(url, options, calls.length); },
-    crypto, URL, TextEncoder, AbortSignal, MeetLinearCore:core, console
+    crypto, URL, TextEncoder, AbortSignal, MeetLinearCore:core, ThreadportPrompts:prompts, console
   });
-  vm.runInContext(fs.readFileSync(require.resolve('../background.js'),'utf8').replace("import './core.js';",''),context);
+  vm.runInContext(fs.readFileSync(require.resolve('../background.js'),'utf8').replace("import './core.js';",'').replace("import './prompts.js';",''),context);
   return {data,calls,call: (message,sender={url:'https://meet.google.com/meet/rap-aqpk-umc',tab:{id:1}}) => new Promise(resolve=>handler(message,sender,resolve))};
 }
 const success = {ok:true,status:200,json:async()=>({data:{issueCreate:{success:true,issue:{identifier:'ENG-1',url:'https://linear.app/example/issue/ENG-1'}}}})};
@@ -98,4 +99,45 @@ test('appends to the supplied current description without broader permissions', 
   assert.ok(body.query.startsWith('mutation'));
   assert.equal((await h.call({type:'update',issueId:'ENG-12',append:true,replaceDescription:true,ticket})).ok,false);
   assert.equal(h.calls.length,1);
+});
+
+test('lists scoped tickets newest first and forwards search and pagination as variables', async () => {
+  const h=harness(async(_url,options)=>{
+    const request=JSON.parse(options.body);
+    assert.equal(request.variables.filter.team.id.eq,'fixed-team');
+    assert.equal(request.variables.filter.or[0].title.containsIgnoreCase,'checkout');
+    assert.equal(request.variables.after,'next-page');
+    assert.match(request.query,/orderBy: createdAt/);
+    return {ok:true,status:200,json:async()=>({data:{issues:{nodes:[
+      {identifier:'ENG-1',title:'Old',createdAt:'2026-01-01T00:00:00Z',url:'https://linear.app/x/issue/ENG-1',team:{id:'fixed-team'}},
+      {identifier:'ENG-2',title:'New',createdAt:'2026-02-01T00:00:00Z',url:'https://linear.app/x/issue/ENG-2',team:{id:'fixed-team'}}
+    ],pageInfo:{hasNextPage:true,endCursor:'page-two'}}}})};
+  });
+  const result=await h.call({type:'listIssues',search:'checkout',after:'next-page',teamId:'foreign'});
+  assert.equal(result.ok,true);
+  assert.equal(result.issues[0].identifier,'ENG-2');
+  assert.equal(result.pageInfo.endCursor,'page-two');
+  assert.doesNotMatch(JSON.stringify(result),/lin_api|description/);
+});
+test('rejects foreign ticket bodies and cross-team issue ID searches', async () => {
+  const h=harness(async()=>({ok:true,status:200,json:async()=>({data:{issue:{identifier:'ENG-1',title:'Foreign',description:'secret',url:'https://linear.app/x/issue/ENG-1',team:{id:'other'}}}})}));
+  assert.equal((await h.call({type:'getIssue',issueId:'ENG-1'})).ok,false);
+  assert.equal((await h.call({type:'listIssues',search:'OTHER-1'})).ok,false);
+  assert.equal(h.calls.length,1);
+});
+test('changed selected tickets stop before any update mutation', async () => {
+  const h=harness(async()=>({ok:true,status:200,json:async()=>({data:{issue:{identifier:'ENG-1',title:'Changed',description:'New edits',updatedAt:'new',url:'https://linear.app/x/issue/ENG-1',team:{id:'fixed-team'}}}})}));
+  const result=await h.call({type:'update',issueId:'ENG-1',replaceDescription:true,expectedUpdatedAt:'old',ticket});
+  assert.equal(result.ok,false);
+  assert.match(result.error,/changed in Linear/);
+  assert.equal(h.calls.length,1);
+  assert.ok(JSON.parse(h.calls[0].body).query.startsWith('query'));
+});
+test('only extension settings can save prompt templates', async () => {
+  const h=harness(async()=>success);
+  assert.equal((await h.call({type:'savePrompts',prompts:{create:'A',update:'B'}})).ok,false);
+  const options={url:'chrome-extension://test/options.html'};
+  assert.equal((await h.call({type:'savePrompts',prompts:{create:'Topic: {{topic}}',update:'{{issueDescription}}'}},options)).ok,true);
+  assert.equal((await h.call({type:'getPrompts'})).prompts.create,'Topic: {{topic}}');
+  assert.equal((await h.call({type:'savePrompts',prompts:{create:'',update:'B'}},options)).ok,false);
 });

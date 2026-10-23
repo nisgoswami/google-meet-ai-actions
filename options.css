@@ -4,3 +4,5 @@
 form, section { margin: 32px 0; } input, select { width: 100%; padding: 14px; border: 1px solid #40404d; border-radius: 8px; color: #fff; background: #1c1d24; font: inherit; }
 button { border: 0; border-radius: 8px; padding: 12px 20px; font: 600 14px system-ui; background: #aaa5ff; color: #18152d; cursor: pointer; margin-top: 16px; } button:disabled { opacity: .5; cursor: wait; } .secondary { background: #2d2e39; color: #e9e9ee; }
 .hint { font-size: 13px; } a { color: #b9b5ff; } .how { border-top: 1px solid #33343d; padding-top: 20px; } h2 { font-size: 18px; } li { padding-bottom: 8px; color: #b9b9c7; } #status { min-height: 24px; color: #c4c0ff; } [hidden] { display: none !important; }
+
+textarea {width:100%;padding:12px;border:1px solid #40404d;border-radius:8px;color:#fff;background:#1c1d24;font:13px/1.5 ui-monospace,monospace;resize:vertical} #prompts-form label{margin-top:24px}

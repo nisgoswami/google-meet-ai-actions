@@ -9,7 +9,7 @@
   <form id="connect-form">
     <label for="key">Linear personal API key</label>
     <input id="key" type="password" autocomplete="off" spellcheck="false" placeholder="lin_api_…" required>
-    <p class="hint">Use <strong>Create issues only</strong>, restricted to your team. No Read, Write, Comments, or Admin permissions are needed. Linear calls this “Create and update issues.” <a href="https://linear.app/settings/account/security" target="_blank" rel="noopener noreferrer">Open Linear settings ↗</a></p>
+    <p class="hint">Use <strong>Read</strong> and <strong>Create issues</strong>, restricted to your team, for the searchable update picker. Create issues includes updating issues. No general Write, Comments, or Admin permissions are needed. Read is optional if you only create tickets or manually replace descriptions. <a href="https://linear.app/settings/account/security" target="_blank" rel="noopener noreferrer">Open Linear settings ↗</a></p>
     <label for="workspace">Workspace name</label><input id="workspace" maxlength="100" placeholder="My workspace" required>
     <label for="team-name">Team name</label><input id="team-name" maxlength="100" placeholder="Engineering" required>
     <label for="team-key">Issue prefix</label><input id="team-key" maxlength="20" placeholder="ENG" pattern="[A-Za-z][A-Za-z0-9_]{0,19}" required>
@@ -18,6 +18,11 @@
     <button id="connect" type="submit">Save connection</button>
   </form>
   <p id="status" role="status" aria-live="polite"></p>
-  <section class="how"><h2>In your next call</h2><ol><li>Ask Gemini to draft a ticket with <strong>Title:</strong> and <strong>Description:</strong>.</li><li>Click <strong>Send to Linear</strong> on that message to create one issue.</li><li>Use <strong>Review</strong> to edit it, or choose <strong>Update an existing issue</strong> and enter its ID.</li></ol></section>
-  <p class="hint">Your key stays in this extension’s local browser storage. Only the ticket fields you send and the Meet link go to Linear. No audio, captions, or meeting history are recorded. Your key is not synced or exposed to Meet.</p>
-</main><script src="options.js"></script></body></html>
+  <section id="prompt-settings"><h2>Gemini prompt templates</h2>
+  <p>Choose a topic when preparing a ticket. Templates stay in this browser and can be edited without reconnecting Linear.</p>
+  <p class="hint">Available values: {{topic}}, {{issueId}}, {{issueTitle}}, {{issueDescription}}, {{teamPrefix}}. Update prompts receive the selected ticket's current content.</p>
+  <form id="prompts-form"><label for="create-prompt">Ask for ticket prompt</label><textarea id="create-prompt" rows="12" maxlength="12000" required></textarea><button id="preset-create" type="button" class="secondary">Fill ticket preset</button>
+  <label for="update-prompt">Ask for update prompt</label><textarea id="update-prompt" rows="15" maxlength="12000" required></textarea><button id="preset-update" type="button" class="secondary">Fill update preset</button><br><button type="submit">Save prompt templates</button><p id="prompts-status" role="status"></p></form></section>
+  <section class="how"><h2>In your next call</h2><ol><li>Click <strong>Ask for ticket</strong> and enter the topic discussed in the call.</li><li>Click <strong>Send to Linear</strong> on that message, choose an action, and confirm.</li><li>Use <strong>Review</strong> to edit it, or use <strong>Ask for update</strong> to search recent tickets and prepare an update from the selected ticket.</li></ol></section>
+  <p class="hint">Your key stays in this extension’s local browser storage. Ticket searches go directly to Linear. A selected ticket is copied into Ask Gemini only when you choose it. No audio, captions, or meeting history are recorded. Your key is not synced or exposed to Meet.</p>
+</main><script src="prompts.js"></script><script src="options.js"></script></body></html>

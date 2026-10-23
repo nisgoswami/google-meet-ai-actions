@@ -35,10 +35,27 @@ body{margin:0;background:#161718;color:#eee;font:15px/1.6 Arial}aside{position:a
     await setup.locator('#team-id').fill('00000000-0000-4000-8000-000000000001');
     await setup.getByRole('button',{name:'Save connection',exact:true}).click();
     await setup.getByText('Saved. Return to Meet.',{exact:false}).waitFor();
+    await setup.locator('#create-prompt').waitFor();
+    await setup.getByRole('button',{name:'Fill ticket preset',exact:true}).click();
+    await setup.locator('#create-prompt').fill((await setup.locator('#create-prompt').inputValue())+'\nCustom instruction: keep the ticket focused.');
+    await setup.getByRole('button',{name:'Save prompt templates',exact:true}).click();
+    await setup.getByText('Prompt templates saved.',{exact:true}).waitFor();
+    await setup.reload();
+    assert.match(await setup.locator('#create-prompt').inputValue(),/Custom instruction/);
     await worker.evaluate(()=>{
-      globalThis.testRequests=[];
+      globalThis.testRequests=[]; globalThis.testReadRequests=[];
       globalThis.fetch=async(url,options)=>{
         const body=JSON.parse(options.body);
+        if (body.query.startsWith('query')) {
+          globalThis.testReadRequests.push(body);
+          const issue={identifier:'ENG-42',title:'Checkout - Fix payment retries',description:'## Existing requirements\n- Preserve payment checks.',createdAt:'2026-10-23T10:00:00Z',updatedAt:'2026-10-23T11:00:00Z',url:'https://linear.app/example/issue/ENG-42',team:{id:'00000000-0000-4000-8000-000000000001'}};
+          let data;
+          if(body.query.includes('issues(')){
+            const newer={...issue,identifier:'ENG-43',title:'Checkout - Improve receipts',url:'https://linear.app/example/issue/ENG-43',createdAt:'2026-10-24T10:00:00Z'};
+            data={issues:{nodes:body.variables.filter.or ? [issue] : [issue,newer],pageInfo:{hasNextPage:false,endCursor:null}}};
+          } else data={issue};
+          return new Response(JSON.stringify({data}),{status:200,headers:{'Content-Type':'application/json'}});
+        }
         globalThis.testRequests.push(body);
         const action=body.query.includes('issueUpdate')?'issueUpdate':'issueCreate';
         return new Response(JSON.stringify({data:{[action]:{success:true,issue:{identifier:'ENG-42',url:'https://linear.app/example/issue/ENG-42'}}}}),{status:200,headers:{'Content-Type':'application/json'}});
@@ -128,13 +145,23 @@ body{margin:0;background:#161718;color:#eee;font:15px/1.6 Arial}aside{position:a
     const composer = page.locator('[aria-label="Ask Gemini"]');
     await composer.fill('Focus on checkout');
     await page.getByRole('button',{name:'Ask for ticket',exact:true}).click();
-    assert.match(await composer.innerText(), /Page or Feature Name - Functionality to Improve or Bug to Fix/);
-    assert.match(await composer.innerText(), /readable, formatted ticket in Markdown/);
+    await page.getByRole('button',{name:'Prepare prompt',exact:true}).click();
+    assert.match(await composer.innerText(), /Page or Feature - Functionality to Improve or Bug to Fix/);
+    assert.match(await composer.innerText(), /changes and decisions actually discussed in this call/);
     assert.match(await composer.innerText(), /Do not output JSON/);
     assert.match(await composer.innerText(), /Focus on checkout/);
+    assert.match(await composer.innerText(), /Custom instruction/);
     await composer.fill('ENG-42 existing issue text');
     await page.getByRole('button',{name:'Ask for update',exact:true}).click();
-    assert.match(await composer.innerText(), /replace the description or append/);
+    await page.getByRole('button',{name:'ENG-43 Checkout - Improve receipts',exact:false}).waitFor();
+    const ticketButtons=page.locator('#ticket-list button');
+    assert.match(await ticketButtons.first().innerText(),/^ENG-43/);
+    await page.locator('#ticket-search').fill('payment');
+    await page.getByRole('button',{name:'ENG-43 Checkout - Improve receipts',exact:false}).waitFor({state:'hidden'});
+    await page.getByRole('button',{name:'ENG-42 Checkout - Fix payment retries',exact:false}).click();
+    await page.waitForFunction(()=>document.querySelector('[aria-label="Ask Gemini"]').innerText.includes('Existing issue ID: ENG-42'));
+    assert.match(await composer.innerText(), /Existing issue ID: ENG-42/);
+    assert.match(await composer.innerText(), /Preserve payment checks/);
     assert.match(await composer.innerText(), /ENG-42 existing issue text/);
     assert.equal(await worker.evaluate(()=>testRequests.length), 2);
     // Append combines the explicit current body with the new details, keeping the title.
@@ -169,6 +196,16 @@ body{margin:0;background:#161718;color:#eee;font:15px/1.6 Arial}aside{position:a
     assert.equal(await page.locator('#title').inputValue(),'Auto-Selling - Align replies inside cards');
     assert.equal(await page.locator('#description').inputValue(),'## Summary\nAlign cards.\n\n## Requirements\n- Replies stay inside cards.');
     await page.getByRole('button',{name:'Cancel',exact:true}).click();
+    // A new Gemini response keeps the selected ticket and its freshness snapshot.
+    await page.locator('.messages').evaluate(el=>el.insertAdjacentHTML('beforeend','<div role="listitem" data-generation-index="2"><div class="pA4Vnf"># Checkout - Fix payment retries\n\n## Requirements\n- Updated payment checks.</div></div>'));
+    const generated=page.locator('[data-generation-index="2"]');
+    await generated.getByRole('button',{name:'Send to Linear ↗',exact:true}).click();
+    assert.equal(await page.locator('#issue-id').inputValue(),'ENG-42');
+    assert.match(await page.locator('#existing-description').inputValue(),/Preserve payment checks/);
+    await page.getByRole('button',{name:'Replace selected fields ↗',exact:true}).click();
+    await page.getByText('Updated:',{exact:false}).waitFor();
+    assert.equal(await worker.evaluate(()=>testRequests.at(-1).variables.id),'ENG-42');
+    assert.ok(await worker.evaluate(()=>testReadRequests.filter(r=>r.query.includes('issue(id:')).length>=2));
     // The key cannot be read by the content script's isolated world.
     assert.deepEqual(errors,[]);
     console.log('PASS: popup before writes, create/replace/append, JSON field separation, Markdown, prompt templates, 320/390px menu-aligned floating layout and footer rerender, duplicate protection, and no scripted sends. No real Linear calls.');

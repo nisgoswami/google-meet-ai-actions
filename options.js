@@ -33,3 +33,15 @@ $('disconnect').addEventListener('click', async () => {
     $('status').textContent = 'Disconnected. You can revoke the key in Linear settings.';
   } catch (err) { $('status').textContent = err.message; }
 });
+
+message({type:'getPrompts'}).then(({prompts})=>{
+  $('create-prompt').value=prompts.create;
+  $('update-prompt').value=prompts.update;
+}).catch(error=>$('prompts-status').textContent=error.message);
+$('preset-create').addEventListener('click',()=>{ $('create-prompt').value=ThreadportPrompts.defaults.create; $('prompts-status').textContent='Ticket preset filled. Save to apply.'; });
+$('preset-update').addEventListener('click',()=>{ $('update-prompt').value=ThreadportPrompts.defaults.update; $('prompts-status').textContent='Update preset filled. Save to apply.'; });
+$('prompts-form').addEventListener('submit',async event=>{
+  event.preventDefault();
+  try {await message({type:'savePrompts',prompts:{create:$('create-prompt').value,update:$('update-prompt').value}});$('prompts-status').textContent='Prompt templates saved.';}
+  catch(error){$('prompts-status').textContent=error.message;}
+});

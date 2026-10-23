@@ -20,7 +20,7 @@
       dialog {position:fixed;inset:0;width:min(540px,calc(100vw - 32px));max-height:calc(100vh - 40px);overflow:auto;background:#202124;color:#eee;border:1px solid #55565d;border-radius:14px;padding:24px;box-shadow:0 14px 60px #0009;font:14px/1.5 Arial,sans-serif}
       dialog::backdrop {background:#0007} h2 {margin:0 0 8px;font-size:21px} p {color:#bdc1c6;margin:6px 0 18px}
       label {display:block;margin:16px 0 6px;font-weight:600} input,textarea,select {width:100%;font:14px/1.5 Arial,sans-serif;padding:10px;background:#151619;color:#eee;border:1px solid #5f6368;border-radius:7px} textarea {min-height:200px;resize:vertical} input[type=checkbox] {width:auto;margin-right:8px} .fields label {margin:8px 0;font-weight:400}
-      .actions {display:flex;gap:8px;justify-content:flex-end;margin-top:18px}.hint {font-size:12px;color:#bdc1c6}.error {color:#f2b8b5}
+      .ticket-list{max-height:320px;overflow:auto;display:grid;gap:6px}.ticket-list button{text-align:left;white-space:normal;padding:12px;background:#292a30;line-height:1.5}.ticket-list small{display:block;color:#bdc1c6;font-weight:400}.actions {display:flex;gap:8px;justify-content:flex-end;margin-top:18px}.hint {font-size:12px;color:#bdc1c6}.error {color:#f2b8b5}
     </style>
     <div class="bar" id="bar" aria-label="Meet to Linear">
       <button class="primary" id="send" title="Send selected text or the latest Gemini answer to Linear">Send to Linear ↗</button>
@@ -42,7 +42,9 @@
       <p class="hint">Your Meet link is included. Only these fields go to Linear.</p>
       <div id="editor-status" role="status" aria-live="polite"></div>
       <div class="actions"><button id="cancel">Cancel</button><button class="primary" id="create">Create ticket ↗</button></div>
-    </dialog>`;
+    </dialog>
+    <dialog id="topic-dialog" aria-labelledby="topic-title"><h2 id="topic-title">Ask for a ticket</h2><p>Focus on changes discussed in this call about one topic.</p><label for="new-topic">Topic</label><input id="new-topic" placeholder="For example: Auto-Selling comment previews" maxlength="2000"><div class="actions"><button id="topic-cancel">Cancel</button><button id="topic-prepare" class="primary">Prepare prompt</button></div><p id="topic-status" role="status"></p></dialog>
+    <dialog id="ticket-picker" aria-labelledby="picker-title"><h2 id="picker-title">Choose a ticket to update</h2><p>Newest tickets first, from your configured team. Selecting a ticket includes its current text in the Gemini prompt.</p><label for="update-topic">Topic or changes discussed</label><input id="update-topic" maxlength="2000" placeholder="Optional: focus on one part of the ticket"><label for="ticket-search">Search tickets</label><input id="ticket-search" type="search" maxlength="200" placeholder="Search by title, description, or issue ID" autocomplete="off"><p id="picker-status" role="status" aria-live="polite"></p><div id="ticket-list" class="ticket-list"></div><button id="ticket-more" hidden>Load more tickets</button><div class="actions"><button id="picker-settings">Settings</button><button id="picker-cancel">Close</button></div></dialog>`;
   const promptHost = document.createElement('div');
   promptHost.id = 'threadport-prompts';
   promptHost.style.cssText = 'display:none;position:fixed;z-index:2147483645;box-sizing:border-box;';
@@ -50,8 +52,9 @@
   promptShadow.innerHTML = `<style>:host{color-scheme:dark}.prompts{display:flex;align-items:center;gap:4px}button{flex:1;min-width:0;font:500 10px/1.2 Arial,sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:7px 6px;border:1px solid #55565d;border-radius:18px;background:#202124;color:#dadce0;cursor:pointer}button:hover{background:#3c4043}button:focus-visible{outline:2px solid #c4b5fd;outline-offset:2px}</style><div class="prompts" aria-label="Gemini ticket prompts"><button id="ask-ticket" title="Prepare a ticket prompt in Ask Gemini">Ask for ticket</button><button id="ask-update" title="Prepare an issue update prompt in Ask Gemini">Ask for update</button></div>`;
   const $ = id => shadow.getElementById(id) || promptShadow.getElementById(id);
   const buttons = [$('send'), $('create')];
-  let input, panel, busy = false, captured = '', config = null, toastTimer, pendingIntent = 'create';
+  let input, panel, busy = false, captured = '', config = null, toastTimer, pendingIntent = 'create', pendingIssue = null, editorIssue = null;
   const updateResponses = new WeakSet();
+  const responseIssues = new WeakMap();
   const messageButtons = new Map();
 
   async function sendMessage(message) {
@@ -120,15 +123,17 @@
     if (config.teamKey) $('issue-id').placeholder = `${config.teamKey}-123`;
     return config;
   }
-  function showEditor(text = sourceText(), intent = 'create') {
+  function showEditor(text = sourceText(), intent = 'create', issue = null) {
     let draft;
     try { draft = parseTicket(text); }
     catch { draft = { title: '', description: text }; }
+    editorIssue = issue && (!draft.issueId || draft.issueId === issue.identifier) ? issue : null;
+    if (editorIssue) draft.issueId = editorIssue.identifier;
     $('title').value = draft.title;
     $('description').value = draft.description;
     const updating = Boolean(draft.issueId) || intent === 'update';
     $('mode').value = updating ? 'update' : '';
-    $('existing-description').value = '';
+    $('existing-description').value = editorIssue?.description || '';
     syncActionUI();
     $('issue-id').value = draft.issueId || '';
     $('replace-title').checked = false;
@@ -158,12 +163,12 @@
       syncActionUI();
     }
   }
-  async function sendText(text, intent = 'create') {
+  async function sendText(text, intent = 'create', issue = null) {
     if (busy) return;
     try {
       if (!(await status()).connected) return void await sendMessage({ type: 'openSettings' });
       if (!text) { showEditor(''); notify('Select Gemini’s ticket text, or paste it into Review.'); return; }
-      showEditor(text, intent);
+      showEditor(text, intent, issue);
     } catch (error) { notify(error.message); }
   }
   function updateMessageButtons() {
@@ -175,7 +180,7 @@
     for (const card of cards) {
       if (messageButtons.has(card)) continue;
       const content = adapter.textElement(card);
-      if (pendingIntent === 'update' && card.querySelector('.pA4Vnf')) updateResponses.add(card);
+      if (pendingIntent === 'update' && card.querySelector('.pA4Vnf')) { updateResponses.add(card); if (pendingIssue) responseIssues.set(card,pendingIssue); }
       const messageHost = document.createElement('div');
       messageHost.className = 'meet-linear-message';
       const isPrompt = Boolean(card.querySelector('[jsname="DPm3Gf"]')) && !card.querySelector('.pA4Vnf');
@@ -200,11 +205,11 @@
         const text = markdown(content);
         if (card.querySelector('[aria-busy="true"]')) { notify('Wait for Gemini to finish.'); return; }
         send.disabled = true;
-        try { await sendText(text, updateResponses.has(card) ? 'update' : 'create'); } finally { send.disabled = false; }
+        try { await sendText(text, updateResponses.has(card) ? 'update' : 'create', responseIssues.get(card)); } finally { send.disabled = false; }
       });
       review.addEventListener('click', event => {
         event.stopPropagation();
-        if (event.isTrusted && !busy) showEditor(markdown(content), updateResponses.has(card) ? 'update' : 'create');
+        if (event.isTrusted && !busy) showEditor(markdown(content), updateResponses.has(card) ? 'update' : 'create', responseIssues.get(card));
       });
       messageButtons.set(card, { host: messageHost, content });
     }
@@ -232,7 +237,8 @@
     $('replace-title').disabled = mode === 'append';
     $('replace-description').disabled = mode === 'append';
     if (mode === 'append') { $('replace-title').checked = false; $('replace-description').checked = true; }
-    $('update-hint').textContent = mode === 'append' ? 'Existing title is kept. New details are added after the current description.' : 'Only checked fields are replaced. Existing text is not fetched.';
+    $('update-hint').textContent = mode === 'append' ? 'Existing title is kept. New details are added after the current description.' : editorIssue ? 'Only checked fields are replaced. The selected ticket is checked for newer changes before sending.' : 'Only checked fields are replaced. Use Ask for update to load the current ticket first.';
+    $('existing-description').readOnly = Boolean(editorIssue && editorIssue.identifier === $('issue-id').value.trim().toUpperCase());
     $('create').textContent = mode === 'append' ? 'Append to ticket ↗' : mode === 'update' ? 'Replace selected fields ↗' : mode === 'create' ? 'Create ticket ↗' : 'Choose an action';
     $('create').disabled = !mode || busy;
   }
@@ -249,21 +255,19 @@
     if (!updating || $('replace-title').checked) {
       if (!/^.+ - .+$/.test($('title').value.trim())) { $('title').focus(); $('editor-status').textContent = 'Use Page or Feature - Improvement or Bug Fix for the title.'; return; }
     }
-    const update = updating ? { issueId: $('issue-id').value, replaceTitle: $('replace-title').checked, replaceDescription: $('replace-description').checked, append: mode === 'append', existingDescription: $('existing-description').value } : null;
+    const update = updating ? { issueId: $('issue-id').value, replaceTitle: $('replace-title').checked, replaceDescription: $('replace-description').checked, append: mode === 'append', existingDescription: $('existing-description').value, expectedUpdatedAt: editorIssue?.identifier === $('issue-id').value.trim().toUpperCase() ? editorIssue.updatedAt : undefined } : null;
     create({ title: $('title').value.trim(), description: $('description').value.trim() }, update);
   });
 
-  function askGemini(updating) {
-    if (!input) return;
+  async function preparePrompt(updating, topic, issue = null) {
+    const {prompts} = await sendMessage({type:'getPrompts'});
+    input = adapter.input();
+    if (!input) throw new Error('Open Ask Gemini to prepare the prompt.');
     pendingIntent = updating ? 'update' : 'create';
-    const context = clean(input.innerText || input.value);
-    const prefix = config?.teamKey || 'ENG';
-    const task = updating
-      ? `Draft updated details for one existing Linear issue from this meeting. Ask for its actual issue ID if missing; never invent one. Do not claim to read Linear. Include a separate "Issue ID:" line immediately below the title with the actual ID (for example ${prefix}-123). The user will choose whether to replace the description or append the new details.`
-      : 'Draft one actionable Linear ticket from this meeting. Use only discussed facts and mark unknowns as open questions.';
-    const format = '# Page or Feature - Specific improvement or bug fix\n\n' + (updating ? `Issue ID: ${prefix}-123\n\n` : '') + '## Summary\nA concise explanation of the change and why it matters.\n\n## Requirements\n- Specific work to do\n\n## Acceptance criteria\n- Observable, testable outcome';
-    const prompt = `${task}\n\nThe title MUST always be "Page or Feature Name - Functionality to Improve or Bug to Fix", using a plain hyphen with spaces. Example: "Instagram Review - Match comment previews to Instagram". Name the actual page or feature and a specific improvement or bug fix.\n\nReturn a readable, formatted ticket in Markdown, starting with the ticket title as a level-one heading, followed by separate Summary, Requirements, and Acceptance criteria sections. Use real line breaks, rendered headings, and bullet lists. Do not output JSON, a code block, escaped newline sequences, or "Title:" and "Description:" field labels. The extension extracts the first heading into Linear's title field and sends only the sections into its description field. For bugs, include Steps to reproduce, Expected behavior, and Actual behavior only when discussed. Omit empty sections and placeholders. No commentary before or after the ticket.\n\nFollow this layout using the actual discussed details:\n${format}${context ? `\n\nMy instructions or existing issue text:\n${context}` : ''}`;
-
+    pendingIssue = issue;
+    const prompt = ThreadportPrompts.render(prompts[updating ? 'update' : 'create'], {
+      topic, issueId:issue?.identifier, issueTitle:issue?.title, issueDescription:issue?.description, teamPrefix:config?.teamKey || 'ENG'
+    });
     input.focus();
     if (input.matches('textarea,input')) {
       const setter = Object.getOwnPropertyDescriptor(input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, 'value').set;
@@ -276,8 +280,69 @@
     input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: prompt }));
     notify('Prompt ready. Send it to Gemini when ready.');
   }
-  $('ask-ticket').addEventListener('click', event => { if (event.isTrusted && !busy) askGemini(false); });
-  $('ask-update').addEventListener('click', event => { if (event.isTrusted && !busy) askGemini(true); });
+  let pickerPage = null, pickerRows = [], searchTimer, pickerGeneration = 0;
+  async function loadTickets(reset = true) {
+    const generation = ++pickerGeneration;
+    if (reset) { pickerRows = []; pickerPage = null; $('ticket-list').replaceChildren(); }
+    $('picker-status').textContent = 'Loading tickets…';
+    $('ticket-more').hidden = true;
+    try {
+      const result = await sendMessage({type:'listIssues',search:$('ticket-search').value,after:reset ? null : pickerPage?.endCursor});
+      if (generation !== pickerGeneration || !$('ticket-picker').open) return;
+      pickerPage = result.pageInfo;
+      pickerRows = [...new Map([...pickerRows,...result.issues].map(issue=>[issue.identifier,issue])).values()].sort((a,b)=>Date.parse(b.createdAt)-Date.parse(a.createdAt));
+      $('ticket-list').replaceChildren();
+      for (const issue of pickerRows) {
+        const button = document.createElement('button');
+        button.append(document.createTextNode(`${issue.identifier} ${issue.title}`));
+        const date = document.createElement('small');
+        date.textContent = `Created ${new Date(issue.createdAt).toLocaleString()}`;
+        button.append(date);
+        button.addEventListener('click',async event=>{
+          if (!event.isTrusted || busy) return;
+          button.disabled=true; $('picker-status').textContent='Loading the current ticket…';
+          try {
+            const {issue:current} = await sendMessage({type:'getIssue',issueId:issue.identifier});
+            if (!$('ticket-picker').open) return;
+            const topic = $('update-topic').value.trim() || current.title;
+            $('ticket-picker').close();
+            await preparePrompt(true,topic,current);
+          } catch(error) { $('picker-status').textContent=error.message; notify(error.message); }
+          finally {button.disabled=false;}
+        });
+        $('ticket-list').append(button);
+      }
+      $('picker-status').textContent = pickerRows.length ? `${pickerRows.length} tickets, newest first` : 'No matching tickets.';
+      $('ticket-more').hidden = !pickerPage?.hasNextPage;
+    } catch(error) { if(generation===pickerGeneration) $('picker-status').textContent=error.message; }
+  }
+  $('ask-ticket').addEventListener('click', event => {
+    if (!event.isTrusted || busy) return;
+    $('new-topic').value=clean(input?.innerText || input?.value);
+    $('topic-status').textContent=''; $('topic-dialog').showModal(); $('new-topic').focus();
+  });
+  $('topic-cancel').addEventListener('click',()=> $('topic-dialog').close());
+  $('topic-prepare').addEventListener('click',async event=>{
+    if (!event.isTrusted || busy) return;
+    const topic=$('new-topic').value.trim();
+    if(!topic){$('topic-status').textContent='Enter the topic discussed in this call.';return;}
+    try {$('topic-dialog').close();await preparePrompt(false,topic);}
+    catch(error){$('topic-dialog').showModal();$('topic-status').textContent=error.message;}
+  });
+  $('ask-update').addEventListener('click',async event=>{
+    if (!event.isTrusted || busy) return;
+    $('ticket-search').value=''; $('update-topic').value=clean(input?.innerText || input?.value);
+    $('ticket-picker').showModal(); $('ticket-search').focus();
+    await loadTickets();
+  });
+  $('ticket-search').addEventListener('input',()=>{ clearTimeout(searchTimer); ++pickerGeneration; searchTimer=setTimeout(()=>loadTickets(),300); });
+  $('ticket-more').addEventListener('click',event=>{if(event.isTrusted)loadTickets(false);});
+  $('picker-cancel').addEventListener('click',()=>{++pickerGeneration;clearTimeout(searchTimer);$('ticket-picker').close();});
+  $('picker-settings').addEventListener('click',event=>{if(event.isTrusted)sendMessage({type:'openSettings'}).catch(error=>notify(error.message));});
+  $('issue-id').addEventListener('input',()=>{
+    if(editorIssue && editorIssue.identifier !== $('issue-id').value.trim().toUpperCase()){editorIssue=null;$('existing-description').value='';}
+    syncActionUI();
+  });
 
   function reposition() {
     input = adapter.input();
