@@ -1,0 +1,117 @@
+const assert = require('node:assert/strict');
+const path = require('node:path');
+const fs = require('node:fs');
+const os = require('node:os');
+// Use an installed Playwright, or set PLAYWRIGHT_PATH to its module entry.
+const { chromium } = require(process.env.PLAYWRIGHT_PATH || 'playwright');
+const sourcePath = path.resolve(__dirname, '..');
+const profile = fs.mkdtempSync(path.join(os.tmpdir(),'meetline-test-'));
+const extensionPath = path.join(profile,'extension');
+fs.cpSync(sourcePath,extensionPath,{recursive:true,filter:p=>!p.includes('/node_modules')&&!p.includes('/.git')&&!p.includes('/dist')});
+// Relax only shadow visibility in the disposable test copy, never production.
+const contentPath=path.join(extensionPath,'content.js');
+fs.writeFileSync(contentPath,fs.readFileSync(contentPath,'utf8').replaceAll("mode: 'closed'","mode: 'open'"));
+const fixture = `<!doctype html><html><head><meta charset="utf-8"><style>
+body{margin:0;background:#161718;color:#eee;font:15px/1.6 Arial}aside{position:absolute;left:12px;top:12px;width:390px;height:730px;background:#202124;padding:16px;box-sizing:border-box}header{font-size:20px} .bubble{margin:20px 0 16px 80px;background:#303134;border-radius:12px;padding:14px;font-weight:400} .pA4Vnf{margin:16px 0 4px;white-space:pre-line}footer{position:absolute;bottom:16px;left:16px;right:16px;background:#141414;border-radius:10px;padding:16px}[contenteditable]{min-height:40px}.messages{max-height:510px;overflow:auto}.copy{color:#aaa;margin-top:12px}
+</style></head><body><aside data-feed-title="A meeting conversation" data-msl-viewport="true"><header>Gemini</header><div class="messages" role="list"><div role="listitem"><div class="bubble" role="heading"><span jsname="DPm3Gf">Draft a ticket for fixing checkout retries.</span></div></div><div role="listitem" data-generation-index="1"><div class="pA4Vnf">Title: Fix checkout retries\n\nDescription: Retry failed payments once.\n\nAcceptance criteria:\n- No duplicate charges.</div><div class="copy">Copy · Report</div></div></div><footer><div contenteditable="true" aria-label="Ask Gemini" role="combobox">Ask Gemini</div></footer></aside></body></html>`;
+(async()=>{
+  const context = await chromium.launchPersistentContext(profile, {
+    executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium', headless:true,
+    ignoreDefaultArgs:['--disable-extensions'],
+    args:[`--disable-extensions-except=${extensionPath}`,`--load-extension=${extensionPath}`],
+    viewport:{width:1280,height:900}
+  });
+  try {
+    const errors=[];
+    let worker=context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
+    const id=worker.url().split('/')[2];
+    const setup=await context.newPage();
+    await setup.goto(`chrome-extension://${id}/options.html`);
+    setup.on('pageerror',err=>errors.push(err.message));
+    await setup.locator('#key').fill('lin_api_TEST');
+    await setup.locator('#workspace').fill('Example');
+    await setup.locator('#team-name').fill('Engineering');
+    await setup.locator('#team-key').fill('ENG');
+    await setup.locator('#team-id').fill('00000000-0000-4000-8000-000000000001');
+    await setup.getByRole('button',{name:'Save connection',exact:true}).click();
+    await setup.getByText('Saved. Return to Meet.',{exact:false}).waitFor();
+    await worker.evaluate(()=>{
+      globalThis.testRequests=[];
+      globalThis.fetch=async(url,options)=>{
+        const body=JSON.parse(options.body);
+        globalThis.testRequests.push(body);
+        const action=body.query.includes('issueUpdate')?'issueUpdate':'issueCreate';
+        return new Response(JSON.stringify({data:{[action]:{success:true,issue:{identifier:'ENG-42',url:'https://linear.app/example/issue/ENG-42'}}}}),{status:200,headers:{'Content-Type':'application/json'}});
+      };
+    });
+    const page=await context.newPage();
+    page.on('pageerror',err=>errors.push(err.message));
+    // Open shadow roots in this test only so Playwright can inspect the UI.
+    await page.addInitScript(()=>{const attach=Element.prototype.attachShadow;Element.prototype.attachShadow=function(options){return attach.call(this,{...options,mode:'open'});};});
+    await page.route('https://meet.google.com/**',route=>route.fulfill({contentType:'text/html',body:fixture}));
+    await page.goto('https://meet.google.com/rap-aqpk-umc');
+    const answer=page.locator('[data-generation-index="1"]');
+    await answer.getByRole('button',{name:'Send to Linear ↗',exact:true}).waitFor();
+    assert.equal(await page.getByRole('button',{name:'Send to Linear ↗',exact:true}).count(),2); // two message controls; global fallback is hidden
+    await page.screenshot({path:path.join(sourcePath,'preview.png')});
+    // Scripted events must never send user data.
+    await answer.getByRole('button',{name:'Send to Linear ↗',exact:true}).evaluate(el=>el.click());
+    assert.equal(await worker.evaluate(()=>testRequests.length),0);
+    await answer.getByRole('button',{name:'Send to Linear ↗',exact:true}).click();
+    await page.getByText('Created:',{exact:false}).waitFor();
+    let requests=await worker.evaluate(()=>testRequests);
+    assert.equal(requests.length,1);
+    assert.equal(requests[0].variables.input.title,'Fix checkout retries');
+    assert.match(requests[0].variables.input.description,/No duplicate charges/);
+    assert.doesNotMatch(requests[0].variables.input.description,/Draft a ticket/);
+    await answer.getByRole('button',{name:'Send to Linear ↗',exact:true}).click();
+    await page.getByText('Already sent:',{exact:false}).waitFor();
+    assert.equal(await worker.evaluate(()=>testRequests.length),1);
+    await answer.getByRole('button',{name:'Review',exact:true}).click();
+    await page.locator('#mode').selectOption('update');
+    await page.locator('#issue-id').fill('ENG-42');
+    await page.locator('#description').fill('Revised acceptance criteria.');
+    await page.screenshot({path:path.join(sourcePath,'preview-review.png')});
+    await page.getByRole('button',{name:'Update issue ↗',exact:true}).click();
+    await page.getByText('Updated:',{exact:false}).waitFor();
+    requests=await worker.evaluate(()=>testRequests);
+    assert.equal(requests[1].variables.id,'ENG-42');
+    assert.equal(requests[1].variables.input.title,undefined);
+    assert.match(requests[1].variables.input.description,/Revised acceptance/);
+    // Re-rendering a card, and changing Gemini's conversation title, retains controls.
+    await page.locator('[data-generation-index="1"] .pA4Vnf').evaluate(el=>el.outerHTML='<div class="pA4Vnf">Title: A new draft\nDescription: New details</div>');
+    await answer.getByRole('button',{name:'Review',exact:true}).click();
+    assert.equal(await page.locator('#title').inputValue(),'A new draft');
+    await page.getByRole('button',{name:'Cancel',exact:true}).click();
+    // Rich Gemini output retains Markdown in the issue body.
+    await answer.locator('.pA4Vnf').evaluate(el => el.innerHTML = '<h2>Title: Format ticket</h2><p><strong>Description:</strong></p><h3>Requirements</h3><ul><li>Keep <strong>bold</strong> text<ul><li>Nested item</li></ul></li></ul><p><a href="https://example.com/spec">Specification</a></p>');
+    await answer.getByRole('button',{name:'Review',exact:true}).click();
+    assert.equal(await page.locator('#title').inputValue(), 'Format ticket');
+    const formatted = await page.locator('#description').inputValue();
+    assert.match(formatted, /### Requirements/);
+    assert.match(formatted, /- +Keep \*\*bold\*\*/);
+    assert.match(formatted, /\[Specification\]\(https:\/\/example.com\/spec\)/);
+    assert.match(formatted, / {2,}- +Nested item/);
+    await page.getByRole('button',{name:'Cancel',exact:true}).click();
+    // Structured updates require review and never create a new issue by mistake.
+    await answer.locator('.pA4Vnf').evaluate(el => el.textContent = 'Issue ID: ENG-42\nTitle: Existing issue\nDescription: Updated requirements');
+    await answer.getByRole('button',{name:'Send to Linear ↗',exact:true}).click();
+    assert.equal(await page.locator('#mode').inputValue(), 'update');
+    assert.equal(await page.locator('#issue-id').inputValue(), 'ENG-42');
+    assert.equal(await worker.evaluate(()=>testRequests.length), 2);
+    await page.getByRole('button',{name:'Cancel',exact:true}).click();
+    const composer = page.locator('[aria-label="Ask Gemini"]');
+    await composer.fill('Focus on checkout');
+    await page.getByRole('button',{name:'Ask for ticket',exact:true}).click();
+    assert.match(await composer.innerText(), /Title: A concise/);
+    assert.match(await composer.innerText(), /Focus on checkout/);
+    await composer.fill('ENG-42 existing issue text');
+    await page.getByRole('button',{name:'Ask for update',exact:true}).click();
+    assert.match(await composer.innerText(), /complete replacement description/);
+    assert.match(await composer.innerText(), /ENG-42 existing issue text/);
+    assert.equal(await worker.evaluate(()=>testRequests.length), 2);
+    // The key cannot be read by the content script's isolated world.
+    assert.deepEqual(errors,[]);
+    console.log('PASS: real extension load, settings, per-message controls, create, duplicate protection, update, rerender, and no scripted sends. No real Linear calls.');
+  } finally { await context.close(); fs.rmSync(profile,{recursive:true,force:true}); }
+})().catch(error=>{console.error(error);process.exitCode=1;});

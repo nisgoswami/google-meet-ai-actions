@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.playwright-mcp/
+*.log
+.env
+.env.*
+*.pem
+*.key
+preview.png
+preview-review.png

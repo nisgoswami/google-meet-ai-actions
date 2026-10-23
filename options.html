@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Threadport · Settings</title><link rel="stylesheet" href="options.css"></head>
+<body><main>
+  <div class="eyebrow">THREADPORT · GOOGLE MEET → LINEAR</div>
+  <h1>Turn the discussion into a ticket.</h1>
+  <p>Connect once. Send and Review buttons appear on messages in your Meet Gemini panel.</p>
+  <section id="current" hidden><strong id="destination"></strong><p>Configured on this browser profile.</p><button id="disconnect" class="secondary">Disconnect</button></section>
+  <form id="connect-form">
+    <label for="key">Linear personal API key</label>
+    <input id="key" type="password" autocomplete="off" spellcheck="false" placeholder="lin_api_…" required>
+    <p class="hint">Use <strong>Create issues only</strong>, restricted to your team. No Read, Write, Comments, or Admin permissions are needed. Linear calls this “Create and update issues.” <a href="https://linear.app/settings/account/security" target="_blank" rel="noopener noreferrer">Open Linear settings ↗</a></p>
+    <label for="workspace">Workspace name</label><input id="workspace" maxlength="100" placeholder="My workspace" required>
+    <label for="team-name">Team name</label><input id="team-name" maxlength="100" placeholder="Engineering" required>
+    <label for="team-key">Issue prefix</label><input id="team-key" maxlength="20" placeholder="ENG" pattern="[A-Za-z][A-Za-z0-9_]{0,19}" required>
+    <label for="team-id">Team UUID</label><input id="team-id" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" required>
+    <p class="hint">In Linear, open your team, press Ctrl/Cmd+K, choose <strong>Copy model UUID</strong>, and select the Team entry. Entering this once avoids granting workspace Read access.</p>
+    <button id="connect" type="submit">Save connection</button>
+  </form>
+  <p id="status" role="status" aria-live="polite"></p>
+  <section class="how"><h2>In your next call</h2><ol><li>Ask Gemini to draft a ticket with <strong>Title:</strong> and <strong>Description:</strong>.</li><li>Click <strong>Send to Linear</strong> on that message to create one issue.</li><li>Use <strong>Review</strong> to edit it, or choose <strong>Update an existing issue</strong> and enter its ID.</li></ol></section>
+  <p class="hint">Your key stays in this extension’s local browser storage. Only the ticket fields you send and the Meet link go to Linear. No audio, captions, or meeting history are recorded. Your key is not synced or exposed to Meet.</p>
+</main><script src="options.js"></script></body></html>
