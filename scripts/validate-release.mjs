@@ -6,7 +6,8 @@ const version = manifest.version;
 if (!/^\d+\.\d+\.\d+$/.test(version) || pkg.version !== version || lock.version !== version || lock.packages[''].version !== version) {
   throw new Error('Manifest, package, and lockfile versions must match.');
 }
-if (process.env.GITHUB_REF_TYPE === 'tag' && process.env.GITHUB_REF_NAME !== `v${version}`) {
+const tag = process.env.EXPECTED_RELEASE_TAG || (process.env.GITHUB_REF_TYPE === 'tag' ? process.env.GITHUB_REF_NAME : '');
+if (tag && tag !== `v${version}`) {
   throw new Error(`Release tag must be v${version}.`);
 }
 console.log(`Release version: ${version}`);
