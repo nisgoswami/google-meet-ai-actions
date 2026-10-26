@@ -78,6 +78,29 @@ body{margin:0;background:#161718;color:#eee;font:15px/1.6 Arial}aside{position:a
     const answer=page.locator('[data-generation-index="1"]');
     await answer.getByRole('button',{name:'Send to Linear ↗',exact:true}).waitFor();
     assert.equal(await page.getByRole('button',{name:'Send to Linear ↗',exact:true}).count(),2); // two message controls; global fallback is hidden
+    // Loading can temporarily remove the composer while keeping the conversation.
+    // Controls on existing messages must retain their DOM identity throughout.
+    await page.evaluate(() => {
+      window.loadingControls = Array.from(document.querySelectorAll('.meet-linear-message'));
+      window.savedFooter = document.querySelector('footer');
+      window.savedFooter.remove();
+    });
+    await page.locator('#threadport-prompts').waitFor({state:'hidden'});
+    for (let frame = 0; frame < 3; frame++) {
+      await page.evaluate(frame => {
+        const response = document.querySelector('.pA4Vnf');
+        response.setAttribute('aria-busy', 'true');
+        response.dataset.loadingFrame = frame;
+        return new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      }, frame);
+      assert.equal(await page.evaluate(() => window.loadingControls.every(el => el.isConnected)), true, 'Loading must retain existing message controls');
+    }
+    await page.evaluate(() => {
+      document.querySelector('.pA4Vnf').removeAttribute('aria-busy');
+      document.querySelector('aside').append(window.savedFooter);
+    });
+    await page.getByRole('button',{name:'Ask for ticket',exact:true}).waitFor();
+    assert.equal(await page.evaluate(() => window.loadingControls.every(el => el.isConnected)), true);
     for (const width of [390, 320]) {
       await page.locator('aside').evaluate((el, width) => el.style.width = width + 'px', width);
       await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
@@ -157,6 +180,34 @@ body{margin:0;background:#161718;color:#eee;font:15px/1.6 Arial}aside{position:a
     assert.equal(await worker.evaluate(()=>testRequests.length), 2);
     await page.getByRole('button',{name:'Cancel',exact:true}).click();
     const composer = page.locator('[aria-label="Ask Gemini"]');
+    await composer.fill('Focus on checkout');
+    await page.getByRole('button',{name:'Ask for ticket',exact:true}).click();
+    // Simulate Meet shortcuts that see a shadow host rather than an input.
+    // Real keystrokes exercise default text insertion; fill() would miss this bug.
+    await page.evaluate(() => {
+      window.testShortcutEvents = [];
+      window.testMeetShortcut = event => {
+        if (event.target.matches('input, textarea, [contenteditable="true"]')) return;
+        window.testShortcutEvents.push(event.type + ':' + event.key);
+        if (event.key.toLowerCase() === 'c') event.preventDefault();
+      };
+      for (const type of ['keydown', 'keypress', 'keyup']) document.addEventListener(type, window.testMeetShortcut);
+    });
+    await page.locator('#new-topic').fill('');
+    await page.locator('#new-topic').pressSequentially('Checkout Screen cC');
+    await page.locator('#new-topic').press('ArrowLeft');
+    await page.locator('#new-topic').press('Backspace');
+    assert.equal(await page.locator('#new-topic').inputValue(), 'Checkout Screen C');
+    assert.deepEqual(await page.evaluate(() => window.testShortcutEvents), []);
+    await page.locator('#new-topic').press('Escape');
+    await page.locator('#topic-dialog').waitFor({state:'hidden'});
+    // Shortcuts outside the extension still reach the host page.
+    await page.locator('body').evaluate(el => { el.tabIndex = -1; el.focus(); });
+    await page.keyboard.press('ArrowLeft');
+    assert.ok((await page.evaluate(() => window.testShortcutEvents.length)) > 0);
+    await page.evaluate(() => {
+      for (const type of ['keydown', 'keypress', 'keyup']) document.removeEventListener(type, window.testMeetShortcut);
+    });
     await composer.fill('Focus on checkout');
     await page.getByRole('button',{name:'Ask for ticket',exact:true}).click();
     await page.getByRole('button',{name:'Prepare prompt',exact:true}).click();
@@ -247,13 +298,71 @@ body{margin:0;background:#161718;color:#eee;font:15px/1.6 Arial}aside{position:a
     await page.locator('#mode').selectOption('create');
     await page.getByText('Defaults apply to new tickets.',{exact:false}).waitFor();
     await page.locator('#issue-state').selectOption('started');
+    await page.locator('#assignee-search').pressSequentially('sAM');
+    assert.deepEqual(await page.locator('#issue-assignee option:not([hidden])').allTextContents(), ['Unassigned', 'Sam']);
     await page.locator('#issue-assignee').selectOption('member-2');
+    await page.locator('#assignee-search').fill('no such person');
+    await page.getByText('No matching people. Selected: Sam.', {exact:true}).waitFor();
+    assert.equal(await page.locator('#issue-assignee').inputValue(), 'member-2', 'Searching must preserve the chosen assignee');
+    await page.locator('#assignee-search').fill('');
+    assert.deepEqual(await page.locator('#issue-assignee option:not([hidden])').allTextContents(), ['Unassigned', 'Alex', 'Sam']);
     await page.getByRole('button',{name:'Create ticket ↗',exact:true}).click();
     await page.getByText('Created:',{exact:false}).waitFor();
     const override=await worker.evaluate(()=>testRequests.at(-1).variables.input);
     assert.equal(override.stateId,'started');assert.equal(override.assigneeId,'member-2');
+    // Reassignment is also sent as assigneeId on an existing issue update.
+    await answer.locator('.pA4Vnf').evaluate(el => el.textContent = 'Issue ID: ENG-42\nTitle: Checkout - Fix payment retries\nDescription: Assign the follow-up.');
+    await answer.getByRole('button',{name:'Send to Linear ↗',exact:true}).click();
+    await page.getByText('Defaults apply to new tickets.',{exact:false}).waitFor();
+    assert.equal(await page.locator('#assignee-search').inputValue(), '');
+    await page.locator('#assignee-search').fill('alex');
+    await page.locator('#issue-assignee').selectOption('member-1');
+    await page.getByRole('button',{name:'Replace selected fields ↗',exact:true}).click();
+    await page.getByText('Updated:',{exact:false}).waitFor();
+    assert.equal(await worker.evaluate(() => testRequests.at(-1).variables.input.assigneeId), 'member-1');
+    // Compact Gemini has neither a feed panel nor a footer/menu anchor.
+    const writesBeforeCompact = await worker.evaluate(() => testRequests.length);
+    for (const field of ['<textarea placeholder="Ask Gemini"></textarea>', '<div contenteditable="true" aria-label="Ask Gemini"></div>']) {
+      await page.locator('body').evaluate((body, field) => {
+        body.innerHTML = `<form style="position:fixed;left:24px;bottom:80px;width:360px;display:flex;align-items:center;background:#242424;padding:12px;border-radius:32px"><span>✦</span>${field}<button type="button" aria-label="Submit">↑</button></form>`;
+        body.querySelector('textarea, [contenteditable]').style.cssText = 'box-sizing:border-box;resize:none;width:280px;height:40px;min-height:40px;border:0;background:transparent;color:white;';
+      }, field);
+      await page.getByRole('button',{name:'Ask for ticket',exact:true}).waitFor();
+      await page.waitForFunction(() => document.querySelector('#threadport-prompts').getBoundingClientRect().top >= document.querySelector('form').getBoundingClientRect().bottom + 7);
+      const prompts = await page.locator('#threadport-prompts').boundingBox();
+      const form = await page.locator('form').boundingBox();
+      assert.ok(prompts.y >= form.y + form.height + 7, `Compact actions sit below the composer: ${JSON.stringify({prompts, form})}`);
+      assert.ok(prompts.x >= 0 && prompts.x + prompts.width <= 1280, 'Compact actions stay in the viewport');
+      await page.getByRole('button',{name:'Ask for ticket',exact:true}).click();
+      await page.locator('#new-topic').pressSequentially('Checkout screen');
+      await page.getByRole('button',{name:'Prepare prompt',exact:true}).click();
+      const compactInput = page.locator('form textarea, form [contenteditable]');
+      const prompt = await compactInput.evaluate(el => el.value ?? el.innerText);
+      assert.match(prompt, /Checkout screen/);
+      await page.getByRole('button',{name:'Ask for update',exact:true}).click();
+      await page.getByRole('button',{name:'ENG-42 Checkout - Fix payment retries',exact:false}).click();
+      await page.waitForFunction(() => {
+        const el = document.querySelector('form textarea, form [contenteditable]');
+        return (el.value ?? el.innerText).includes('Existing issue ID: ENG-42');
+      });
+      // Composer near the bottom leaves space for the actions above instead.
+      await page.locator('form').evaluate(el => el.style.bottom = '0px');
+      await page.waitForFunction(() => document.querySelector('#threadport-prompts').getBoundingClientRect().bottom < document.querySelector('form').getBoundingClientRect().top);
+    }
+    await page.locator('body').evaluate(body => {
+      body.innerHTML = '<button id="gemini-launcher" style="position:fixed;left:24px;bottom:80px;width:360px;height:48px">Ask Gemini</button>';
+      body.querySelector('button').addEventListener('click', event => {
+        event.currentTarget.outerHTML = '<form style="position:fixed;left:24px;bottom:80px;width:360px"><textarea aria-label="Ask Gemini"></textarea></form>';
+      });
+    });
+    await page.waitForFunction(() => document.querySelector('#threadport-prompts').getBoundingClientRect().top > document.querySelector('#gemini-launcher').getBoundingClientRect().bottom);
+    await page.getByRole('button',{name:'Ask for ticket',exact:true}).click();
+    await page.locator('#new-topic').fill('Compact launcher');
+    await page.getByRole('button',{name:'Prepare prompt',exact:true}).click();
+    await page.waitForFunction(() => document.querySelector('textarea[aria-label="Ask Gemini"]')?.value.includes('Compact launcher'));
+    assert.equal(await worker.evaluate(() => testRequests.length), writesBeforeCompact);
     // The key cannot be read by the content script's isolated world.
     assert.deepEqual(errors,[]);
-    console.log('PASS: popup before writes, create/replace/append, JSON field separation, Markdown, prompt templates, 320/390px menu-aligned floating layout and footer rerender, duplicate protection, and no scripted sends. No real Linear calls.');
+    console.log('PASS: popup before writes, create/replace/append, JSON field separation, Markdown, prompt templates, compact composer actions, 320/390px menu-aligned floating layout and footer rerender, duplicate protection, and no scripted sends. No real Linear calls.');
   } finally { await context.close(); fs.rmSync(profile,{recursive:true,force:true}); }
 })().catch(error=>{console.error(error);process.exitCode=1;});

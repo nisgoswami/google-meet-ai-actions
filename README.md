@@ -23,7 +23,7 @@ For existing work, **Ask for update** opens a searchable list of your team's Lin
 | Searchable ticket updates | Search titles, descriptions, or an exact issue ID. Recent tickets are ordered by creation date, newest first, with pagination. |
 | Update detection | Recognizes team issue IDs, Linear issue links, selected update tickets, explicit update instructions, and exact title matches. Ambiguous matches require selection. |
 | Backlog and status | Load the team's real workflow states, save a default, and override it before sending. Backlog is selected initially when available. |
-| Assignees | Save a default active team member, choose another person per send, or leave a new ticket unassigned. Updates keep the current assignee unless changed. |
+| Assignees | Search the active team members loaded from Linear, choose a person per send, save a default, or leave a new ticket unassigned. Updates keep the current assignee unless changed. |
 | Configurable Gemini prompts | Edit ticket and update templates in extension settings, with preset buttons and topic/ticket placeholders. |
 | Formatting | Preserves headings, lists, emphasis, links, and code. Extracts Gemini's heading or styled title without repeating it in the description. |
 | Safer updates | Checks the selected ticket for newer changes before sending and stops if the selection is stale. |

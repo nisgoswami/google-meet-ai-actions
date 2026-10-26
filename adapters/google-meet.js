@@ -5,7 +5,11 @@
     id: 'google-meet',
     visible,
     input(doc = document) {
-      return Array.from(doc.querySelectorAll('[aria-label="Ask Gemini"][contenteditable="true"],textarea[aria-label="Ask Gemini"]')).find(visible);
+      return Array.from(doc.querySelectorAll('[aria-label="Ask Gemini"][contenteditable="true"],textarea[aria-label="Ask Gemini"],input[aria-label="Ask Gemini"],textarea[placeholder="Ask Gemini"],input[placeholder="Ask Gemini"],[contenteditable="true"][data-placeholder="Ask Gemini"]')).find(visible);
+    },
+    launcher(doc = document) {
+      return Array.from(doc.querySelectorAll('button, [role="button"]')).find(element => visible(element) &&
+        (element.getAttribute('aria-label')?.trim() === 'Ask Gemini' || element.textContent.trim() === 'Ask Gemini'));
     },
     promptAnchor(input) { return input?.closest('footer')?.querySelector('button[aria-label="More actions"]'); },
     panel(input) { return input?.closest('[data-feed-title]'); },

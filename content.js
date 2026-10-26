@@ -39,7 +39,7 @@
       </div>
       <label for="title">Title</label><input id="title" maxlength="250" autocomplete="off" placeholder="Page or Feature - Improvement or Bug Fix"><p class="hint">Example: Instagram Review - Match comment previews to Instagram</p>
       <label for="description">Description</label><textarea id="description" maxlength="50000" placeholder="Paste or edit the ticket details…"></textarea>
-      <div class="properties"><div><label for="issue-state">Status</label><select id="issue-state"><option value="">Team default</option></select></div><div><label for="issue-assignee">Assign to</label><select id="issue-assignee"><option value="">Unassigned</option></select></div></div><p id="properties-status" class="hint" role="status"></p>
+      <div class="properties"><div><label for="issue-state">Status</label><select id="issue-state"><option value="">Team default</option></select></div><div><label for="assignee-search">Assign to</label><input id="assignee-search" type="search" placeholder="Search people…" autocomplete="off" aria-controls="issue-assignee"><select id="issue-assignee" size="5" aria-label="Assignee"><option value="">Unassigned</option></select><p id="assignee-results" class="hint" role="status"></p></div></div><p id="properties-status" class="hint" role="status"></p>
       <p class="hint">Your Meet link is included. Only selected fields go to Linear.</p>
       <div id="editor-status" role="status" aria-live="polite"></div>
       <div class="actions"><button id="cancel">Cancel</button><button class="primary" id="create">Create ticket ↗</button></div>
@@ -52,6 +52,14 @@
   const promptShadow = promptHost.attachShadow({ mode: 'closed' });
   promptShadow.innerHTML = `<style>:host{color-scheme:dark}.prompts{display:flex;align-items:center;gap:4px}button{flex:1;min-width:0;font:500 10px/1.2 Arial,sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:7px 6px;border:1px solid #55565d;border-radius:18px;background:#202124;color:#dadce0;cursor:pointer}button:hover{background:#3c4043}button:focus-visible{outline:2px solid #c4b5fd;outline-offset:2px}</style><div class="prompts" aria-label="Gemini ticket prompts"><button id="ask-ticket" title="Prepare a ticket prompt in Ask Gemini">Ask for ticket</button><button id="ask-update" title="Prepare an issue update prompt in Ask Gemini">Ask for update</button></div>`;
   const $ = id => shadow.getElementById(id) || promptShadow.getElementById(id);
+  // Meet sees the shadow host instead of the focused field and can mistake
+  // typing for a meeting shortcut (for example C for captions). Keep keyboard
+  // events inside our UI, while preserving native editing and dialog behavior.
+  for (const root of [shadow, promptShadow]) {
+    for (const type of ['keydown', 'keypress', 'keyup']) {
+      root.addEventListener(type, event => event.stopPropagation());
+    }
+  }
   const buttons = [$('send'), $('create')];
   let input, panel, busy = false, captured = '', config = null, toastTimer, pendingIntent = 'create', pendingIssue = null, editorIssue = null, teamMetadata = null, editorSession = 0, detectionGeneration = 0;
   const updateResponses = new WeakSet();
@@ -254,8 +262,24 @@
       $('issue-state').value=teamMetadata.defaults.stateId || '';
       $('issue-assignee').value=teamMetadata.defaults.assigneeId || '';
     }
+    filterAssignees();
   }
+  function filterAssignees() {
+    const query = $('assignee-search').value.trim().toLocaleLowerCase();
+    let matches = 0;
+    for (const option of $('issue-assignee').options) {
+      const person = option.value && option.value !== '__unassigned__';
+      option.hidden = Boolean(person && !option.textContent.toLocaleLowerCase().includes(query));
+      if (person && !option.hidden) matches++;
+    }
+    const selected = $('issue-assignee').selectedOptions[0];
+    const result = matches ? `${matches} ${matches === 1 ? 'person' : 'people'}` : 'No matching people.';
+    $('assignee-results').textContent = teamMetadata ? `${result}${selected?.hidden ? ` Selected: ${selected.textContent}.` : ''}` : '';
+  }
+  $('assignee-search').addEventListener('input', filterAssignees);
+  $('issue-assignee').addEventListener('change', filterAssignees);
   async function loadEditorMetadata(session) {
+    $('assignee-search').value = '';
     $('properties-status').textContent='Loading team statuses and people…';
     try {
       const result=await sendMessage({type:'getTeamOptions'});
@@ -317,6 +341,24 @@
   async function preparePrompt(updating, topic, issue = null) {
     const {prompts} = await sendMessage({type:'getPrompts'});
     input = adapter.input();
+    if (!input) {
+      const launcher = adapter.launcher();
+      if (launcher) {
+        // The collapsed pill opens the editable composer on demand.
+        input = await new Promise(resolve => {
+          let timer;
+          const observer = new MutationObserver(check);
+          function check() {
+            const found = adapter.input();
+            if (found) { observer.disconnect(); clearTimeout(timer); resolve(found); }
+          }
+          observer.observe(document.body, {subtree:true, childList:true, attributes:true});
+          timer = setTimeout(() => { observer.disconnect(); resolve(null); }, 3000);
+          launcher.click();
+          check();
+        });
+      }
+    }
     if (!input) throw new Error('Open Ask Gemini to prepare the prompt.');
     pendingIntent = updating ? 'update' : 'create';
     pendingIssue = issue;
@@ -408,10 +450,14 @@
 
   function reposition() {
     input = adapter.input();
+    const composer = input || adapter.launcher();
     // Meet changes data-feed-title to the conversation title after the first prompt.
-    panel = adapter.panel(input);
+    // Meet temporarily removes/hides the composer while Gemini is loading.
+    // Keep the connected conversation so its message controls are not torn down
+    // and reinserted every time the composer changes during streaming.
+    panel = input ? adapter.panel(input) : visible(panel) ? panel : null;
     updateMessageButtons();
-    if (!input || !panel || !visible(panel)) {
+    if (!composer || (panel && !visible(panel))) {
       host.style.display = 'none';
       promptHost.remove();
       return;
@@ -431,10 +477,23 @@
         promptHost.style.display = 'block';
         promptHost.style.top = `${menuBox.top + (menuBox.height - promptHost.getBoundingClientRect().height) / 2}px`;
       }
+    } else if (!anchor) {
+      // Compact Meet composer has no side panel or footer menu. Put the prompt
+      // row outside the entry rather than covering its text or native send button.
+      const box = (input ? input.closest('form') || input.parentElement : composer).getBoundingClientRect();
+      const width = Math.min(240, box.width, innerWidth - 16);
+      promptHost.style.width = `${width}px`;
+      promptHost.style.left = `${Math.max(8, Math.min(innerWidth - width - 8, box.left))}px`;
+      promptHost.style.display = 'block';
+      const height = promptHost.getBoundingClientRect().height;
+      const top = box.bottom + 8;
+      promptHost.style.top = `${Math.max(8, top + height <= innerHeight - 8 ? top : box.top - height - 8)}px`;
     }
+    // Compact mode offers prompt actions; response/review controls belong to the panel.
+    if (!panel) $('bar').hidden = true;
     if (!host.isConnected) document.documentElement.append(host);
-    const box = (input.closest('footer') || input.parentElement).getBoundingClientRect();
-    const inputBox = input.getBoundingClientRect();
+    const box = (input ? input.closest('footer') || input.parentElement : composer).getBoundingClientRect();
+    const inputBox = composer.getBoundingClientRect();
     host.style.display = 'block';
     const width = Math.min(360, Math.max(270, box.width - 24));
     host.style.width = `${width}px`;
