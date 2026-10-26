@@ -26,7 +26,7 @@ jobs:
       - run: npm ci
       - run: node scripts/validate-release.mjs
       - run: npm test
-      - run: npx playwright install --with-deps chromium
+      - run: npx playwright install chromium
       - name: Browser regression tests
         run: |
           export CHROMIUM_PATH="$(node -p "require('playwright').chromium.executablePath()")"
