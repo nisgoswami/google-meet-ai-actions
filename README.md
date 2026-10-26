@@ -8,9 +8,9 @@
 
 ## What it does
 
-During a Google Meet call, use **Ask for ticket** to prepare a configurable Gemini prompt about one topic. The preset asks Gemini to capture the changes, decisions, requirements, and acceptance criteria discussed about that topic. Use **Send to Linear** on the resulting message, review the fields, and confirm.
+During a Google Meet call, use **Action → Tickets → Create** to prepare a configurable Gemini prompt about one topic. The preset asks Gemini to capture the changes, decisions, requirements, and acceptance criteria discussed about that topic. Use **Send to Linear** on the resulting message, review the fields, and confirm.
 
-For existing work, **Ask for update** opens a searchable list of your team's Linear tickets, newest first. Choose a ticket to load its current text into the Gemini prompt, generate an updated draft from the call, and review the replacement or appended description.
+For existing work, **Action → Tickets → Update** opens a searchable list of your team's Linear tickets, newest first. Choose a ticket to load its current text into the Gemini prompt, generate an updated draft from the call, and review the replacement or appended description.
 
 ![Google Meet Gemini draft with ticket prompts and Send to Linear controls](docs/images/meeting-to-linear.png)
 
@@ -103,7 +103,7 @@ Reload the extension after changing its source, then refresh Meet. Settings chan
 ## Create a Linear ticket from a meeting
 
 1. Open **Ask Gemini** during the call.
-2. Click **Ask for ticket** and enter a topic, such as `Instagram comment preview layout`.
+2. Click **Action → Tickets → Create** and enter a topic, such as `Instagram comment preview layout`.
 3. Prepare the prompt, then submit it using Gemini's own send button.
 4. Click **Send to Linear** on the resulting draft.
 5. Choose **Create a new ticket**, review title/description, status, and assignee, and confirm.
@@ -139,7 +139,7 @@ The first heading becomes the Linear title. The remaining sections become the de
 
 ## Update an existing Linear ticket
 
-Click **Ask for update**, search the team's tickets, and select one. Its latest title and description are inserted into the configurable update prompt. The preset asks Gemini to preserve unchanged requirements and incorporate changes discussed in the call about your chosen topic.
+Click **Action → Tickets → Update**, search the team's tickets, and select one. Its latest title and description are inserted into the configurable update prompt. The preset asks Gemini to preserve unchanged requirements and incorporate changes discussed in the call about your chosen topic.
 
 After Gemini replies, **Send to Linear** opens Review with the issue selected. Choose:
 
@@ -238,4 +238,6 @@ Primary documentation: [Google Meet help](https://support.google.com/meet/), [Li
 
 For AI tools and documentation consumers, see [llms.txt](llms.txt). This file provides a factual documentation map; it does not grant additional product capabilities or guarantee search ranking.
 
-Use **Session tickets** in Meet to view links to tickets created in that tab. **Summarize in Gemini** prepares a prompt containing their links and saved creation details; submit it in Gemini when ready. The list survives reloads, ends when the tab closes, and can be cleared for a new call. It retains up to 100 tickets with 4,000 characters of description each; later Linear edits are not reflected.
+Use **Action → Tickets → Summarize Created Tickets** in Meet to view links to tickets created in that tab. **Summarize Tickets** prepares a prompt containing their links and saved creation details; submit it in Gemini when ready. The list survives reloads, ends when the tab closes, and can be cleared for a new call. It retains up to 100 tickets with 4,000 characters of description each; later Linear edits are not reflected.
+
+Use **Action → Tickets → Create / Update / Summarize Created Tickets** in the Gemini composer. The summary prompt always starts with “Find the Tickets Here -”, followed by “Topics”, ticket titles, links, saved details, and the summary request. Submit it to Gemini when ready.

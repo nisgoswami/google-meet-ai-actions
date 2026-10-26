@@ -14,6 +14,11 @@ fs.writeFileSync(contentPath,fs.readFileSync(contentPath,'utf8').replaceAll("mod
 const fixture = `<!doctype html><html><head><meta charset="utf-8"><style>
 body{margin:0;background:#161718;color:#eee;font:15px/1.6 Arial}aside{position:absolute;left:12px;top:12px;width:390px;height:730px;background:#202124;padding:16px;box-sizing:border-box}header{font-size:20px} .bubble{margin:20px 0 16px 80px;background:#303134;border-radius:12px;padding:14px;font-weight:400} .pA4Vnf{margin:16px 0 4px;white-space:pre-line}footer{position:absolute;bottom:16px;left:16px;right:16px;background:#141414;border-radius:10px;padding:16px}[contenteditable]{min-height:40px}.native-actions{display:flex;gap:8px;align-items:center;height:32px}.native-actions button{width:32px;height:32px}.spark{margin-right:auto;width:20px}.messages{max-height:510px;overflow:auto}.copy{color:#aaa;margin-top:12px}
 </style></head><body><aside data-feed-title="A meeting conversation" data-msl-viewport="true"><header>Gemini</header><div class="messages" role="list"><div role="listitem"><div class="bubble" role="heading"><span jsname="DPm3Gf">Draft a ticket for fixing checkout retries.</span></div></div><div role="listitem" data-generation-index="1"><div class="pA4Vnf">Title: Checkout - Fix payment retries\n\nDescription: Retry failed payments once.\n\nAcceptance criteria:\n- No duplicate charges.</div><div class="copy">Copy · Report</div></div></div><div class="suggestions"><button>Summarize the discussion so far</button><button>What was discussed in the last two minutes?</button></div><footer><div contenteditable="true" aria-label="Ask Gemini" role="combobox">Ask Gemini</div><div class="native-actions"><span class="spark">✦</span><button aria-label="More actions" aria-expanded="false">⋮</button><button aria-label="Submit">↑</button></div></footer></aside></body></html>`;
+async function ticketAction(page, name) {
+  await page.getByRole('button',{name:'Action',exact:true}).click();
+  await page.getByRole('menuitem',{name:'Tickets ▸',exact:true}).click();
+  await page.getByRole('menuitem',{name,exact:true}).click();
+}
 (async()=>{
   const context = await chromium.launchPersistentContext(profile, {
     executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium', headless:true,
@@ -121,7 +126,7 @@ body{margin:0;background:#161718;color:#eee;font:15px/1.6 Arial}aside{position:a
       document.querySelector('.pA4Vnf').removeAttribute('aria-busy');
       document.querySelector('aside').append(window.savedFooter);
     });
-    await page.getByRole('button',{name:'Ask for ticket',exact:true}).waitFor();
+    await page.getByRole('button',{name:'Action',exact:true}).waitFor();
     assert.equal(await page.evaluate(() => window.loadingControls.every(el => el.isConnected)), true);
     for (const width of [390, 320]) {
       await page.locator('aside').evaluate((el, width) => el.style.width = width + 'px', width);
@@ -140,9 +145,9 @@ body{margin:0;background:#161718;color:#eee;font:15px/1.6 Arial}aside{position:a
     await page.getByRole('button',{name:'More actions',exact:true}).evaluate(el => el.setAttribute('aria-expanded','true'));
     await page.locator('#threadport-prompts').waitFor({state:'hidden'});
     await page.getByRole('button',{name:'More actions',exact:true}).evaluate(el => el.setAttribute('aria-expanded','false'));
-    await page.getByRole('button',{name:'Ask for ticket',exact:true}).waitFor();
+    await page.getByRole('button',{name:'Action',exact:true}).waitFor();
     await page.locator('footer').evaluate(el => el.outerHTML = el.outerHTML);
-    await page.getByRole('button',{name:'Ask for ticket',exact:true}).waitFor();
+    await page.getByRole('button',{name:'Action',exact:true}).waitFor();
     await page.screenshot({path:path.join(sourcePath,'preview.png')});
     // Scripted events must never send user data.
     await answer.getByRole('button',{name:'Send to Linear ↗',exact:true}).evaluate(el=>el.click());
@@ -166,24 +171,25 @@ body{margin:0;background:#161718;color:#eee;font:15px/1.6 Arial}aside{position:a
     await page.getByRole('button',{name:'Create ticket ↗',exact:true}).click();
     await page.getByText('Already sent:',{exact:false}).waitFor();
     assert.equal(await worker.evaluate(()=>testRequests.length),1);
-    await page.getByRole('button',{name:'Session tickets',exact:true}).click();
+    await ticketAction(page,'Summarize Created Tickets');
     await page.getByText('1 ticket created in this session.',{exact:true}).waitFor();
     const sessionLink=page.locator('#session-list a');
     assert.equal(await sessionLink.count(),1);
     assert.equal(await sessionLink.getAttribute('href'),'https://linear.app/example/issue/ENG-42');
-    await page.getByRole('button',{name:'Summarize in Gemini',exact:true}).click();
+    await page.getByRole('button',{name:'Summarize Tickets',exact:true}).click();
     const summary=await page.locator('[aria-label="Ask Gemini"]').innerText();
-    assert.match(summary,/Summarize the tickets created/);
+    assert.ok(summary.startsWith('Find the Tickets Here -'));
+    assert.match(summary,/Find the Tickets Here -\s+Topics/);
     assert.match(summary,/https:\/\/linear.app\/example\/issue\/ENG-42/);
     assert.match(summary,/No duplicate charges/);
     assert.equal(await page.locator('#session-dialog').evaluate(el=>el.open),false);
     assert.equal(await worker.evaluate(()=>testRequests.length),1);
     await page.reload();
-    await page.getByRole('button',{name:'Session tickets',exact:true}).click();
+    await ticketAction(page,'Summarize Created Tickets');
     await page.getByText('1 ticket created in this session.',{exact:true}).waitFor();
     await page.getByRole('button',{name:'Clear list',exact:true}).click();
     await page.getByText('No tickets created in this session yet.',{exact:true}).waitFor();
-    assert.equal(await page.getByRole('button',{name:'Summarize in Gemini',exact:true}).isDisabled(),true);
+    assert.equal(await page.getByRole('button',{name:'Summarize Tickets',exact:true}).isDisabled(),true);
     await page.getByRole('button',{name:'Close',exact:true}).click();
     await answer.getByRole('button',{name:'Review',exact:true}).click();
     await page.locator('#mode').selectOption('update');
@@ -222,7 +228,7 @@ body{margin:0;background:#161718;color:#eee;font:15px/1.6 Arial}aside{position:a
     await page.getByRole('button',{name:'Cancel',exact:true}).click();
     const composer = page.locator('[aria-label="Ask Gemini"]');
     await composer.fill('Focus on checkout');
-    await page.getByRole('button',{name:'Ask for ticket',exact:true}).click();
+    await ticketAction(page,'Create');
     // Simulate Meet shortcuts that see a shadow host rather than an input.
     // Real keystrokes exercise default text insertion; fill() would miss this bug.
     await page.evaluate(() => {
@@ -250,7 +256,7 @@ body{margin:0;background:#161718;color:#eee;font:15px/1.6 Arial}aside{position:a
       for (const type of ['keydown', 'keypress', 'keyup']) document.removeEventListener(type, window.testMeetShortcut);
     });
     await composer.fill('Focus on checkout');
-    await page.getByRole('button',{name:'Ask for ticket',exact:true}).click();
+    await ticketAction(page,'Create');
     await page.getByRole('button',{name:'Prepare prompt',exact:true}).click();
     assert.match(await composer.innerText(), /Page or Feature - Functionality to Improve or Bug to Fix/);
     assert.match(await composer.innerText(), /changes and decisions actually discussed in this call/);
@@ -258,7 +264,7 @@ body{margin:0;background:#161718;color:#eee;font:15px/1.6 Arial}aside{position:a
     assert.match(await composer.innerText(), /Focus on checkout/);
     assert.match(await composer.innerText(), /Custom instruction/);
     await composer.fill('ENG-42 existing issue text');
-    await page.getByRole('button',{name:'Ask for update',exact:true}).click();
+    await ticketAction(page,'Update');
     await page.getByRole('button',{name:'ENG-43 Checkout - Improve receipts',exact:false}).waitFor();
     const ticketButtons=page.locator('#ticket-list button');
     assert.match(await ticketButtons.first().innerText(),/^ENG-43/);
@@ -368,19 +374,19 @@ body{margin:0;background:#161718;color:#eee;font:15px/1.6 Arial}aside{position:a
         body.innerHTML = `<form style="position:fixed;left:24px;bottom:80px;width:360px;display:flex;align-items:center;background:#242424;padding:12px;border-radius:32px"><span>✦</span>${field}<button type="button" aria-label="Submit">↑</button></form>`;
         body.querySelector('textarea, [contenteditable]').style.cssText = 'box-sizing:border-box;resize:none;width:280px;height:40px;min-height:40px;border:0;background:transparent;color:white;';
       }, field);
-      await page.getByRole('button',{name:'Ask for ticket',exact:true}).waitFor();
+      await page.getByRole('button',{name:'Action',exact:true}).waitFor();
       await page.waitForFunction(() => document.querySelector('#threadport-prompts').getBoundingClientRect().top >= document.querySelector('form').getBoundingClientRect().bottom + 7);
       const prompts = await page.locator('#threadport-prompts').boundingBox();
       const form = await page.locator('form').boundingBox();
       assert.ok(prompts.y >= form.y + form.height + 7, `Compact actions sit below the composer: ${JSON.stringify({prompts, form})}`);
       assert.ok(prompts.x >= 0 && prompts.x + prompts.width <= 1280, 'Compact actions stay in the viewport');
-      await page.getByRole('button',{name:'Ask for ticket',exact:true}).click();
+      await ticketAction(page,'Create');
       await page.locator('#new-topic').pressSequentially('Checkout screen');
       await page.getByRole('button',{name:'Prepare prompt',exact:true}).click();
       const compactInput = page.locator('form textarea, form [contenteditable]');
       const prompt = await compactInput.evaluate(el => el.value ?? el.innerText);
       assert.match(prompt, /Checkout screen/);
-      await page.getByRole('button',{name:'Ask for update',exact:true}).click();
+      await ticketAction(page,'Update');
       await page.getByRole('button',{name:'ENG-42 Checkout - Fix payment retries',exact:false}).click();
       await page.waitForFunction(() => {
         const el = document.querySelector('form textarea, form [contenteditable]');
@@ -397,7 +403,7 @@ body{margin:0;background:#161718;color:#eee;font:15px/1.6 Arial}aside{position:a
       });
     });
     await page.waitForFunction(() => document.querySelector('#threadport-prompts').getBoundingClientRect().top > document.querySelector('#gemini-launcher').getBoundingClientRect().bottom);
-    await page.getByRole('button',{name:'Ask for ticket',exact:true}).click();
+    await ticketAction(page,'Create');
     await page.locator('#new-topic').fill('Compact launcher');
     await page.getByRole('button',{name:'Prepare prompt',exact:true}).click();
     await page.waitForFunction(() => document.querySelector('textarea[aria-label="Ask Gemini"]')?.value.includes('Compact launcher'));
@@ -429,6 +435,6 @@ body{margin:0;background:#161718;color:#eee;font:15px/1.6 Arial}aside{position:a
     assert.equal(await worker.evaluate(async()=>(await chrome.storage.local.get('linearOAuth')).linearOAuth),undefined);
     // The key cannot be read by the content script's isolated world.
     assert.deepEqual(errors,[]);
-    console.log('PASS: popup before writes, create/replace/append, JSON field separation, Markdown, prompt templates, compact composer actions, 320/390px menu-aligned floating layout and footer rerender, duplicate protection, session ticket links/reload/clear/Gemini summary, and no scripted sends. No real Linear calls.');
+    console.log('PASS: popup before writes, create/replace/append, JSON field separation, Markdown, prompt templates, nested Action → Tickets menu, compact composer actions, 320/390px menu-aligned floating layout and footer rerender, duplicate protection, session ticket links/reload/clear/Gemini summary, and no scripted sends. No real Linear calls.');
   } finally { await context.close(); fs.rmSync(profile,{recursive:true,force:true}); }
 })().catch(error=>{console.error(error);process.exitCode=1;});
