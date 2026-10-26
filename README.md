@@ -194,6 +194,14 @@ Browser tests use `/usr/bin/chromium`, or `CHROMIUM_PATH`. Set `PLAYWRIGHT_PATH`
 
 The package script builds `dist/google-meet-ai-actions-<version>.zip` from an explicit runtime-file whitelist. Credentials, local configuration, dependencies, tests, and preview files are excluded.
 
+### Automated releases
+
+GitHub Actions runs unit and Chromium browser tests on pushes to `main`, pull requests, and version tags. To release, update the matching versions in `manifest.json`, `package.json`, and `package-lock.json`, commit and push, then push a matching tag such as `v1.4.1`. The workflow builds the ZIP, submits it to the Chrome Web Store for review, and creates a GitHub release with the ZIP attached. Google publishes the update after approval. A pending store submission must be resolved before submitting a different version.
+
+Running **Release extension** manually from the Actions tab runs the checks and verifies store access without uploading or publishing. Re-running a tag already submitted or published does not upload it again.
+
+Publishing uses GitHub OIDC and a dedicated Google service account through Workload Identity Federation; no permanent publishing key or refresh token is stored. The repository's Actions Variables contain `CWS_GCP_PROJECT_ID`, `CWS_WORKLOAD_IDENTITY_PROVIDER`, `CWS_SERVICE_ACCOUNT`, `CWS_PUBLISHER_ID`, and `CWS_EXTENSION_ID`. Google restricts authentication to this repository's numeric ID, owner, release workflow, and `main` or version-tag refs. The service account is registered with the Chrome Web Store publisher and has no general Google Cloud project roles.
+
 | File | Responsibility |
 | --- | --- |
 | `adapters/google-meet.js` | Meet input, panel, messages, and menu anchoring. |

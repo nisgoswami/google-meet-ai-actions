@@ -4,6 +4,7 @@ dist/
 *.log
 .env
 .env.*
+gha-creds-*.json
 *.pem
 *.key
 preview.png
