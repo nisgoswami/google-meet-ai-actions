@@ -82,6 +82,23 @@ async function validateProperties(config, properties) {
   return properties;
 }
 
+function sessionKey(sender, config) {
+  const source = MeetLinearCore.meetingUrl(sender.url);
+  if (!source) throw new Error('Open a Google Meet call to view session tickets.');
+  return `${sender.tab.id}|${source}|${config.teamId}`;
+}
+async function sessionTickets(sender, config, entry = null) {
+  const key = sessionKey(sender, config);
+  const {meetingTickets = {}} = await chrome.storage.session.get('meetingTickets');
+  const tickets = meetingTickets[key] || [];
+  if (entry && !tickets.some(ticket => ticket.identifier === entry.identifier)) {
+    tickets.push(entry);
+    meetingTickets[key] = tickets.slice(-100);
+    await chrome.storage.session.set({meetingTickets});
+  }
+  return tickets.slice(-100);
+}
+
 async function handle(message, sender) {
   await trustedStorage;
   const isOptions = sender.url === chrome.runtime.getURL('options.html') && !sender.tab?.url?.startsWith('https://meet.google.com/');
@@ -189,12 +206,19 @@ async function handle(message, sender) {
     const {oauthCandidate} = await chrome.storage.session.get('oauthCandidate');
     if (oauthCandidate) await LinearOAuth.revoke(oauthCandidate.tokens);
     await chrome.storage.local.remove(['config', 'deliveries','issueDefaults','linearOAuth']);
-    await chrome.storage.session.remove(['candidate','oauthCandidate']);
+    await chrome.storage.session.remove(['candidate','oauthCandidate','meetingTickets']);
     teamOptionsCache = null;
     return {revoked};
   }
-  if (!['create', 'update', 'listIssues', 'getIssue','findMatchingIssues'].includes(message.type) || !isMeet) throw new Error('Unsupported action.');
+  if (!['create', 'update', 'listIssues', 'getIssue','findMatchingIssues','sessionTickets','clearSessionTickets'].includes(message.type) || !isMeet) throw new Error('Unsupported action.');
   if (!config?.key || !config.teamId) throw new Error('Connect Linear in extension settings first.');
+  if (message.type === 'sessionTickets') return {tickets:await sessionTickets(sender, config)};
+  if (message.type === 'clearSessionTickets') {
+    const {meetingTickets = {}} = await chrome.storage.session.get('meetingTickets');
+    delete meetingTickets[sessionKey(sender, config)];
+    await chrome.storage.session.set({meetingTickets});
+    return {};
+  }
   if (message.type === 'getIssue') return {issue:await readIssue(config,message.issueId)};
   if (message.type==='findMatchingIssues') {
     const title=String(message.title||'').trim();
@@ -267,7 +291,10 @@ async function handle(message, sender) {
   const fingerprint = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
   const { deliveries = {} } = await chrome.storage.local.get('deliveries');
   let delivery = deliveries[fingerprint];
-  if (validIssue(delivery?.issue)) return { issue: delivery.issue, alreadySent: true };
+  if (validIssue(delivery?.issue)) {
+    await sessionTickets(sender, config, {...delivery.issue,title,description:description.slice(0,4000),descriptionTruncated:description.length>4000,createdAt:delivery.createdAt});
+    return { issue: delivery.issue, alreadySent: true };
+  }
   if (!delivery) {
     delivery = { id: crypto.randomUUID(), createdAt: Date.now() };
     deliveries[fingerprint] = delivery;
@@ -289,6 +316,7 @@ async function handle(message, sender) {
   // Refresh the pruned map rather than reintroducing discarded receipts.
   const stored = await chrome.storage.local.get('deliveries');
   await chrome.storage.local.set({ deliveries: { ...stored.deliveries, [fingerprint]: delivery } });
+  await sessionTickets(sender, config, {...delivery.issue,title,description:description.slice(0,4000),descriptionTruncated:description.length>4000,createdAt:delivery.createdAt});
   return { issue: delivery.issue, alreadySent: false };
 }
 
@@ -299,3 +327,13 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   return true;
 });
 chrome.action.onClicked.addListener(() => chrome.runtime.openOptionsPage());
+
+// The list survives page/worker reloads, and ends when its Meet tab closes.
+chrome.tabs?.onRemoved.addListener(tabId => {
+  const cleanup = queue.then(async () => {
+    const {meetingTickets = {}} = await chrome.storage.session.get('meetingTickets');
+    for (const key of Object.keys(meetingTickets)) if (key.startsWith(`${tabId}|`)) delete meetingTickets[key];
+    await chrome.storage.session.set({meetingTickets});
+  });
+  queue = cleanup.catch(() => {});
+});

@@ -10,6 +10,8 @@ function harness(fetchImpl, oauth = {}) {
   const data = { config: {key:'lin_api_TEST',teamId:'fixed-team',teamName:'Engineering',teamKey:'ENG',workspaceName:'Example'} };
   let handler;
   const calls = [];
+  const session = {};
+  let onTabRemoved;
   function area(store) { return {
     setAccessLevel: async () => {},
     get: async key => key == null ? structuredClone(store) : {[key]: structuredClone(store[key])},
@@ -18,15 +20,16 @@ function harness(fetchImpl, oauth = {}) {
   }; }
   const context = vm.createContext({
     chrome: {
-      storage: {local:area(data),session:area({})},
+      storage: {local:area(data),session:area(session)},
       runtime: {getURL: file => `chrome-extension://test/${file}`,onMessage:{addListener: fn => handler = fn}},
+      tabs:{onRemoved:{addListener:fn=>onTabRemoved=fn}},
       action: {onClicked:{addListener:()=>{}}}
     },
     fetch: async (url, options) => { calls.push({url,...options});return fetchImpl(url, options, calls.length); },
     crypto, URL, TextEncoder, AbortSignal, MeetLinearCore:core, ThreadportPrompts:prompts, LinearOAuth:oauth, console
   });
   vm.runInContext(fs.readFileSync(require.resolve('../background.js'),'utf8').replace(/^import .*;\n/gm,''),context);
-  return {data,calls,call: (message,sender={url:'https://meet.google.com/meet/rap-aqpk-umc',tab:{id:1}}) => new Promise(resolve=>handler(message,sender,resolve))};
+  return {data,calls,session,closeTab:id=>onTabRemoved(id),call: (message,sender={url:'https://meet.google.com/meet/rap-aqpk-umc',tab:{id:1}}) => new Promise(resolve=>handler(message,sender,resolve))};
 }
 const success = {ok:true,status:200,json:async()=>({data:{issueCreate:{success:true,issue:{identifier:'ENG-1',url:'https://linear.app/example/issue/ENG-1'}}}})};
 const ticket = {title:'Fix checkout',description:'Retry payment'};
@@ -204,4 +207,42 @@ test('OAuth is settings-only, keeps tokens private, and binds the saved team to 
   const created=await h.call({type:'create',ticket});assert.equal(created.ok,true);
   assert.equal(h.calls.at(-1).headers.Authorization,'Bearer private-access');
   const disconnected=await h.call({type:'disconnect'},sender);assert.equal(disconnected.ok,true);assert.equal(h.data.linearOAuth,undefined);
+});
+
+test('session tickets track confirmed creates, deduplicate retries, and isolate tabs, calls, and teams', async () => {
+  const h = harness(async () => success);
+  assert.equal((await h.call({type:'sessionTickets'})).tickets.length,0);
+  await h.call({type:'create',ticket});
+  await h.call({type:'create',ticket});
+  const list = await h.call({type:'sessionTickets'});
+  assert.equal(list.tickets.length,1);
+  assert.equal(list.tickets[0].title,ticket.title);
+  assert.equal(list.tickets[0].description,ticket.description);
+  assert.equal(list.tickets[0].url,'https://linear.app/example/issue/ENG-1');
+  assert.doesNotMatch(JSON.stringify(list),/lin_api/);
+  assert.equal((await h.call({type:'sessionTickets'},{url:'https://meet.google.com/rap-aqpk-umc',tab:{id:2}})).tickets.length,0);
+  assert.equal((await h.call({type:'sessionTickets'},{url:'https://meet.google.com/abc-defg-hij',tab:{id:1}})).tickets.length,0);
+  h.data.config.teamId='other';
+  assert.equal((await h.call({type:'sessionTickets'})).tickets.length,0);
+  h.data.config.teamId='fixed-team';
+  assert.equal((await h.call({type:'sessionTickets'},{url:'https://meet.google.com/home',tab:{id:1}})).ok,false);
+  assert.equal((await h.call({type:'sessionTickets'},{url:'chrome-extension://test/options.html'})).ok,false);
+  h.closeTab(1);
+  assert.equal((await h.call({type:'sessionTickets'})).tickets.length,0);
+});
+test('session list excludes failed creates and updates, truncates snapshots, and clears without deleting Linear tickets', async () => {
+  const h=harness(async()=>success);
+  await h.call({type:'create',ticket:{...ticket,description:'x'.repeat(5000)}});
+  const entry=(await h.call({type:'sessionTickets'})).tickets[0];
+  assert.equal(entry.description.length,4000);
+  assert.equal(entry.descriptionTruncated,true);
+  await h.call({type:'clearSessionTickets'});
+  assert.equal((await h.call({type:'sessionTickets'})).tickets.length,0);
+  assert.equal(h.calls.length,1);
+  const failed=harness(async()=>({ok:false,status:500}));
+  await failed.call({type:'create',ticket});
+  assert.equal((await failed.call({type:'sessionTickets'})).tickets.length,0);
+  const update=harness(async()=>({ok:true,status:200,json:async()=>({data:{issueUpdate:{success:true,issue:{identifier:'ENG-1',url:'https://linear.app/example/issue/ENG-1'}}}})}));
+  await update.call({type:'update',issueId:'ENG-1',replaceDescription:true,ticket});
+  assert.equal((await update.call({type:'sessionTickets'})).tickets.length,0);
 });

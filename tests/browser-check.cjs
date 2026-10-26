@@ -166,6 +166,25 @@ body{margin:0;background:#161718;color:#eee;font:15px/1.6 Arial}aside{position:a
     await page.getByRole('button',{name:'Create ticket ↗',exact:true}).click();
     await page.getByText('Already sent:',{exact:false}).waitFor();
     assert.equal(await worker.evaluate(()=>testRequests.length),1);
+    await page.getByRole('button',{name:'Session tickets',exact:true}).click();
+    await page.getByText('1 ticket created in this session.',{exact:true}).waitFor();
+    const sessionLink=page.locator('#session-list a');
+    assert.equal(await sessionLink.count(),1);
+    assert.equal(await sessionLink.getAttribute('href'),'https://linear.app/example/issue/ENG-42');
+    await page.getByRole('button',{name:'Summarize in Gemini',exact:true}).click();
+    const summary=await page.locator('[aria-label="Ask Gemini"]').innerText();
+    assert.match(summary,/Summarize the tickets created/);
+    assert.match(summary,/https:\/\/linear.app\/example\/issue\/ENG-42/);
+    assert.match(summary,/No duplicate charges/);
+    assert.equal(await page.locator('#session-dialog').evaluate(el=>el.open),false);
+    assert.equal(await worker.evaluate(()=>testRequests.length),1);
+    await page.reload();
+    await page.getByRole('button',{name:'Session tickets',exact:true}).click();
+    await page.getByText('1 ticket created in this session.',{exact:true}).waitFor();
+    await page.getByRole('button',{name:'Clear list',exact:true}).click();
+    await page.getByText('No tickets created in this session yet.',{exact:true}).waitFor();
+    assert.equal(await page.getByRole('button',{name:'Summarize in Gemini',exact:true}).isDisabled(),true);
+    await page.getByRole('button',{name:'Close',exact:true}).click();
     await answer.getByRole('button',{name:'Review',exact:true}).click();
     await page.locator('#mode').selectOption('update');
     await page.locator('#issue-id').fill('ENG-42');
@@ -410,6 +429,6 @@ body{margin:0;background:#161718;color:#eee;font:15px/1.6 Arial}aside{position:a
     assert.equal(await worker.evaluate(async()=>(await chrome.storage.local.get('linearOAuth')).linearOAuth),undefined);
     // The key cannot be read by the content script's isolated world.
     assert.deepEqual(errors,[]);
-    console.log('PASS: popup before writes, create/replace/append, JSON field separation, Markdown, prompt templates, compact composer actions, 320/390px menu-aligned floating layout and footer rerender, duplicate protection, and no scripted sends. No real Linear calls.');
+    console.log('PASS: popup before writes, create/replace/append, JSON field separation, Markdown, prompt templates, compact composer actions, 320/390px menu-aligned floating layout and footer rerender, duplicate protection, session ticket links/reload/clear/Gemini summary, and no scripted sends. No real Linear calls.');
   } finally { await context.close(); fs.rmSync(profile,{recursive:true,force:true}); }
 })().catch(error=>{console.error(error);process.exitCode=1;});

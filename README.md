@@ -33,6 +33,8 @@ For existing work, **Ask for update** opens a searchable list of your team's Lin
 
 The prompt buttons float beside Gemini's three-dot control at the bottom of the composer. Per-message controls appear at the bottom right of prompts and answers.
 
+Settings open on the **Linear** tab. **Jira**, **Notion**, and **Trello** have separate **Coming Soon** tabs; their integrations are not available yet.
+
 ![Review a Linear ticket with create, replace, append, status, and assignee controls](docs/images/review-ticket.png)
 
 Screenshots use fictional meeting and ticket data.
@@ -155,9 +157,9 @@ The extension processes selected Gemini text locally. Linear API requests go dir
 - Selected ticket text is inserted into Gemini only when you choose a ticket. Google receives the prepared prompt when you submit it.
 - The extension does not record audio, read captions, retain meeting transcripts, collect analytics, or load remote scripts.
 - Status/member lookups, exact-title checks, and ticket searches use the configured team's access boundary.
-- Chrome permissions are limited to storage, content scripts on Meet, and network access to the Linear API.
+- Chrome permissions are limited to storage, identity for Linear OAuth, content scripts on Meet, and network access to the Linear API.
 - Local storage is not encrypted against someone with access to the OS/browser profile. Revoke a compromised key in Linear.
-- Removing the extension deletes its local storage. Disconnect removes the key, destination, defaults, and delivery receipts; saved prompt templates remain until changed or the extension is removed.
+- Removing the extension deletes its local storage. Disconnect removes the login tokens or key, destination, defaults, delivery receipts, and session ticket lists; saved prompt templates remain until changed or the extension is removed.
 
 Read the full [privacy policy](PRIVACY.md). Do not include API keys or private meeting data in public bug reports.
 
@@ -235,3 +237,5 @@ Use [GitHub Issues](https://github.com/nisgoswami/google-meet-ai-actions/issues)
 Primary documentation: [Google Meet help](https://support.google.com/meet/), [Linear API](https://linear.app/developers/graphql), [Linear API permissions](https://linear.app/docs/api-and-webhooks), and [Chrome extension documentation](https://developer.chrome.com/docs/extensions/).
 
 For AI tools and documentation consumers, see [llms.txt](llms.txt). This file provides a factual documentation map; it does not grant additional product capabilities or guarantee search ranking.
+
+Use **Session tickets** in Meet to view links to tickets created in that tab. **Summarize in Gemini** prepares a prompt containing their links and saved creation details; submit it in Gemini when ready. The list survives reloads, ends when the tab closes, and can be cleared for a new call. It retains up to 100 tickets with 4,000 characters of description each; later Linear edits are not reflected.

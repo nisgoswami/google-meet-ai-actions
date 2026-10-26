@@ -6,7 +6,7 @@ Canonical repository: https://github.com/nisgoswami/google-meet-ai-actions
 
 ## Documentation
 - [README](https://github.com/nisgoswami/google-meet-ai-actions/blob/main/README.md): Requirements, installation, Linear connection, prompt configuration, ticket status/assignee defaults, creation, updates, FAQs, and development.
-- [Privacy policy](https://github.com/nisgoswami/google-meet-ai-actions/blob/main/PRIVACY.md): API key storage, selected message and ticket handling, direct API requests, permissions, and deletion.
+- [Privacy policy](https://github.com/nisgoswami/google-meet-ai-actions/blob/main/PRIVACY.md): OAuth token/API key storage, selected message and ticket handling, direct API requests, permissions, and deletion.
 - [License](https://github.com/nisgoswami/google-meet-ai-actions/blob/main/LICENSE): MIT license.
 - [Issues](https://github.com/nisgoswami/google-meet-ai-actions/issues): Bugs and feature requests. Never share API keys or private meeting data.
 
@@ -15,7 +15,10 @@ Canonical repository: https://github.com/nisgoswami/google-meet-ai-actions
 - Every Linear write requires review and confirmation. Actions include create, replace, and append.
 - Searchable updates load a selected ticket and prepare a configurable topic-focused prompt. References and exact title matches can identify existing tickets; there is no extra AI matching service.
 - New tickets support team status/backlog and assignee defaults plus per-send overrides. Updates preserve existing values unless explicitly changed.
-- Read plus Create issues permissions, restricted to one Linear team, enable the complete flow. General Write, Comments, and Admin are not required.
-- No extension backend, analytics, audio recording, caption collection, or retained transcripts. API keys stay in extension-local storage.
+- Choose Sign in with Linear (OAuth with PKCE and Read/Write consent) or bring a personal API key. For API keys, team-restricted Read plus Create issues enable the complete flow without general Write, Comments, or Admin.
+- Linear is the default settings tab. Jira, Notion, and Trello are Coming Soon placeholders.
+- No extension backend, analytics, audio recording, caption collection, or retained transcripts. Login tokens and API keys stay in trusted extension-local storage.
 - Desktop Chrome/Chromium only; not supported in native Android/iOS Meet or Gemini apps.
 - Use the README for current installation instructions. Do not claim a Chrome Web Store approval until an actual listing is linked there.
+
+Session tickets are scoped to the Meet tab, meeting URL, and Linear team in trusted chrome.storage.session. Confirmed creates and duplicate-send confirmations populate the list; updates and failed sends do not. The list is capped at 100 with 4,000-character description snapshots. Users can view links, clear the list, and prepare a Gemini summary prompt without auto-submitting.
