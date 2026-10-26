@@ -20,6 +20,7 @@
       dialog {position:fixed;inset:0;width:min(540px,calc(100vw - 32px));max-height:calc(100vh - 40px);overflow:auto;background:#202124;color:#eee;border:1px solid #55565d;border-radius:14px;padding:24px;box-shadow:0 14px 60px #0009;font:14px/1.5 Arial,sans-serif}
       dialog::backdrop {background:#0007} h2 {margin:0 0 8px;font-size:21px} p {color:#bdc1c6;margin:6px 0 18px}
       label {display:block;margin:16px 0 6px;font-weight:600} input,textarea,select {width:100%;font:14px/1.5 Arial,sans-serif;padding:10px;background:#151619;color:#eee;border:1px solid #5f6368;border-radius:7px} textarea {min-height:200px;resize:vertical} input[type=checkbox] {width:auto;margin-right:8px} .fields label {margin:8px 0;font-weight:400}
+      .screenshots{display:flex;flex-wrap:wrap;gap:10px;margin:10px 0}.screenshots figure{margin:0;width:130px}.screenshots img{display:block;width:130px;height:85px;object-fit:contain;background:#151619;border:1px solid #5f6368;border-radius:6px}.screenshots figcaption{overflow-wrap:anywhere;font-size:12px}.screenshots button{white-space:normal}
       .properties{display:grid;grid-template-columns:1fr 1fr;gap:12px}.ticket-list{max-height:320px;overflow:auto;display:grid;gap:6px}.ticket-list button{text-align:left;white-space:normal;padding:12px;background:#292a30;line-height:1.5}.ticket-list small{display:block;color:#bdc1c6;font-weight:400}.actions {display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;margin-top:18px}.hint {font-size:12px;color:#bdc1c6}.error {color:#f2b8b5}
     </style>
     <div class="bar" id="bar" aria-label="Meet to Linear">
@@ -39,6 +40,7 @@
       </div>
       <label for="title">Title</label><input id="title" maxlength="250" autocomplete="off" placeholder="Page or Feature - Improvement or Bug Fix"><p class="hint">Example: Instagram Review - Match comment previews to Instagram</p>
       <label for="description">Description</label><textarea id="description" maxlength="50000" placeholder="Paste or edit the ticket details…"></textarea>
+      <section id="screenshot-fields" aria-label="Screenshot attachments"><label for="screenshot-files">Attach screenshots</label><input id="screenshot-files" type="file" accept="image/png,image/jpeg,image/webp" multiple><p class="hint">Choose files or paste a screenshot into this dialog. Up to 3 images, 2 MB each. Sent to Linear when you confirm Create.</p><div id="screenshot-list" class="screenshots"></div><p id="screenshot-status" class="hint" role="status"></p></section>
       <div class="properties"><div><label for="issue-state">Status</label><select id="issue-state"><option value="">Team default</option></select></div><div><label for="assignee-search">Assign to</label><input id="assignee-search" type="search" placeholder="Search people…" autocomplete="off" aria-controls="issue-assignee"><select id="issue-assignee" size="5" aria-label="Assignee"><option value="">Unassigned</option></select><p id="assignee-results" class="hint" role="status"></p></div></div><p id="properties-status" class="hint" role="status"></p>
       <p class="hint">Your Meet link is included. Only selected fields go to Linear.</p>
       <div id="editor-status" role="status" aria-live="polite"></div>
@@ -92,10 +94,62 @@
   }
   const buttons = [$('send'), $('create')];
   let input, panel, busy = false, captured = '', config = null, toastTimer, pendingIntent = 'create', pendingIssue = null, editorIssue = null, teamMetadata = null, editorSession = 0, detectionGeneration = 0;
+  let screenshots = [], screenshotLoading = false;
   const updateResponses = new WeakSet();
   const responseIssues = new WeakMap();
   const messageButtons = new Map();
 
+  function renderScreenshots() {
+    $('screenshot-list').replaceChildren();
+    screenshots.forEach((shot, index) => {
+      const figure = document.createElement('figure');
+      const img = document.createElement('img'); img.src = shot.data; img.alt = `Screenshot ${index + 1}`;
+      const caption = document.createElement('figcaption'); caption.textContent = shot.name;
+      const remove = document.createElement('button'); remove.textContent = 'Remove'; remove.setAttribute('aria-label', `Remove screenshot ${index + 1}`);
+      remove.disabled = busy || screenshotLoading;
+      remove.addEventListener('click', () => { screenshots.splice(index, 1); $('screenshot-status').textContent = screenshots.length ? `${screenshots.length} screenshot${screenshots.length === 1 ? '' : 's'} attached.` : ''; renderScreenshots(); });
+      figure.append(img, caption, remove); $('screenshot-list').append(figure);
+    });
+    $('screenshot-files').disabled = busy || screenshotLoading;
+  }
+  async function attachScreenshots(files) {
+    if (busy || screenshotLoading || !files.length) return;
+    const session = editorSession;
+    screenshotLoading = true; syncActionUI(); renderScreenshots();
+    $('screenshot-status').textContent = 'Reading screenshots…';
+    try {
+      if (screenshots.length + files.length > MeetLinearCore.screenshotLimits.count) throw new Error('Attach up to 3 screenshots.');
+      const added = [];
+      for (const file of files) {
+        if (!['image/png','image/jpeg','image/webp'].includes(file.type)) throw new Error('Choose a PNG, JPEG, or WebP screenshot.');
+        if (file.size > MeetLinearCore.screenshotLimits.bytes) throw new Error('Each screenshot must be 2 MB or smaller.');
+        const data = await new Promise((resolve, reject) => {
+          const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = () => reject(new Error('Could not read this screenshot.')); reader.readAsDataURL(file);
+        });
+        MeetLinearCore.validateScreenshots([data]);
+        // Verify the browser can actually decode the selected image.
+        const image = new Image(); image.src = data;
+        try { await image.decode(); } catch { throw new Error('Could not read this screenshot.'); }
+        added.push({name:file.name || 'Pasted screenshot', data});
+      }
+      if (session !== editorSession || !$('editor').open) return;
+      screenshots.push(...added);
+      $('screenshot-status').textContent = `${screenshots.length} screenshot${screenshots.length === 1 ? '' : 's'} attached.`;
+    } catch (error) {
+      if (session === editorSession) $('screenshot-status').textContent = error.message;
+    } finally {
+      if (session === editorSession) { screenshotLoading = false; $('screenshot-files').value = ''; renderScreenshots(); syncActionUI(); }
+    }
+  }
+  $('screenshot-files').addEventListener('change', () => attachScreenshots([...$('screenshot-files').files]));
+  $('editor').addEventListener('paste', event => {
+    if (!event.isTrusted || $('screenshot-fields').hidden || busy) return;
+    const files = [...(event.clipboardData?.items || [])].filter(item => item.kind === 'file').map(item => item.getAsFile()).filter(Boolean);
+    if (files.length) { event.preventDefault(); event.stopPropagation(); attachScreenshots(files); }
+  });
+  $('editor').addEventListener('close', () => {
+    ++editorSession; screenshots = []; screenshotLoading = false; $('screenshot-files').value = ''; $('screenshot-status').textContent = ''; renderScreenshots();
+  });
   async function sendMessage(message) {
     let result;
     try { result = await chrome.runtime.sendMessage(message); }
@@ -166,6 +220,7 @@
     let draft;
     try { draft = parseTicket(text); }
     catch { draft = { title: '', description: text }; }
+    screenshots = []; screenshotLoading = false; $('screenshot-status').textContent = ''; $('screenshot-files').value = ''; renderScreenshots();
     const session = ++editorSession; const detection = ++detectionGeneration;
     const detected = MeetLinearCore.detectUpdate(text,config?.teamKey);
     if(!draft.issueId && detected.issueId) draft.issueId = detected.issueId;
@@ -190,8 +245,8 @@
     detectExistingTicket(draft,detected,detection);
   }
   async function create(ticket, update = null) {
-    if (busy) return;
-    busy = true;
+    if (busy || screenshotLoading) return;
+    busy = true; renderScreenshots();
     buttons.forEach(button => button.disabled = true);
     const properties = {};
     if(teamMetadata) {
@@ -201,7 +256,7 @@
     }
     notify(update ? 'Updating in Linear…' : 'Sending to Linear…');
     try {
-      const result = await sendMessage(update ? { type: 'update', ticket, ...update, ...properties } : { type: 'create', ticket, ...properties });
+      const result = await sendMessage(update ? { type: 'update', ticket, ...update, ...properties } : { type: 'create', ticket, screenshots: screenshots.map(shot => shot.data), ...properties });
       $('editor').close();
       notify(result.updated ? 'Updated:' : result.alreadySent ? 'Already sent:' : 'Created:', result.issue);
       captured = '';
@@ -211,7 +266,7 @@
     } finally {
       busy = false;
       buttons.forEach(button => button.disabled = false);
-      syncActionUI();
+      syncActionUI(); renderScreenshots();
     }
   }
   async function sendText(text, intent = 'create', issue = null) {
@@ -341,6 +396,7 @@
   function syncActionUI() {
     const mode = $('mode').value;
     const updating = mode === 'update' || mode === 'append';
+    $('screenshot-fields').hidden = updating;
     $('update-fields').hidden = !updating;
     $('append-fields').hidden = mode !== 'append';
     $('replace-title').disabled = mode === 'append';
@@ -349,7 +405,7 @@
     $('update-hint').textContent = mode === 'append' ? 'Existing title is kept. New details are added after the current description.' : editorIssue ? 'Only checked fields are replaced. The selected ticket is checked for newer changes before sending.' : 'Only checked fields are replaced. Use Ask for update to load the current ticket first.';
     $('existing-description').readOnly = Boolean(editorIssue && editorIssue.identifier === $('issue-id').value.trim().toUpperCase());
     $('create').textContent = mode === 'append' ? 'Append to ticket ↗' : mode === 'update' ? 'Replace selected fields ↗' : mode === 'create' ? 'Create ticket ↗' : 'Choose an action';
-    $('create').disabled = !mode || busy;
+    $('create').disabled = !mode || busy || screenshotLoading;
   }
   $('mode').addEventListener('change', () => {
     ++detectionGeneration;syncActionUI();refreshProperties();

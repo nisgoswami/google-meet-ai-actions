@@ -26,6 +26,7 @@ For existing work, **Action → Tickets → Update** opens a searchable list of 
 | Backlog and status | Load the team's real workflow states, save a default, and override it before sending. Backlog is selected initially when available. |
 | Assignees | Search the active team members loaded from Linear, choose a person per send, save a default, or leave a new ticket unassigned. Updates keep the current assignee unless changed. |
 | Configurable Gemini prompts | Edit ticket and update templates in extension settings, with preset buttons and topic/ticket placeholders. |
+| Screenshot attachments | Choose PNG, JPEG, or WebP files or paste screenshots in the creation dialog. Preview and remove them before confirming Create. Up to 3 images, 2 MB each, embedded in the Linear issue using its [supported image upload format](https://linear.app/developers/how-to-upload-a-file-to-linear). |
 | Formatting | Preserves headings, lists, emphasis, links, and code. Extracts Gemini's heading or styled title without repeating it in the description. |
 | Safer updates | Checks the selected ticket for newer changes before sending and stops if the selection is stale. |
 | Local processing | No extension backend, extra model API, analytics, audio recording, or caption collection. |

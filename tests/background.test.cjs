@@ -246,3 +246,34 @@ test('session list excludes failed creates and updates, truncates snapshots, and
   await update.call({type:'update',issueId:'ENG-1',replaceDescription:true,ticket});
   assert.equal((await update.call({type:'sessionTickets'})).tickets.length,0);
 });
+
+const screenshot = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aY1cAAAAASUVORK5CYII=';
+test('creation embeds screenshots, deduplicates retries, and never stores image data', async () => {
+  const h = harness(async () => success);
+  assert.equal((await h.call({type:'create',ticket,screenshots:[screenshot]})).ok,true);
+  assert.match(JSON.parse(h.calls[0].body).variables.input.description, /## Screenshots/);
+  assert.ok(JSON.parse(h.calls[0].body).variables.input.description.includes(`![Screenshot 1](${screenshot})`));
+  assert.equal((await h.call({type:'create',ticket,screenshots:[screenshot]})).alreadySent,true);
+  assert.equal(h.calls.length,1);
+  // The same text without the attachment is a different creation.
+  assert.equal((await h.call({type:'create',ticket})).alreadySent,false);
+  assert.equal(h.calls.length,2);
+  assert.doesNotMatch(JSON.stringify([h.data,h.session]), /data:image|iVBORw0KGgo/);
+});
+test('invalid or excessive screenshots and attachments on updates fail before network writes', async () => {
+  for (const images of [[screenshot,screenshot,screenshot,screenshot],['data:image/svg+xml;base64,PHN2Zz4='],['data:image/png;base64,dGV4dA=='],['data:image/png;base64,%%%%'],['data:image/jpeg;base64,'+'A'.repeat(2800000)],{}]) {
+    const h=harness(async()=>success);
+    assert.equal((await h.call({type:'create',ticket,screenshots:images})).ok,false);
+    assert.equal(h.calls.length,0);
+  }
+  const h=harness(async()=>success);
+  assert.equal((await h.call({type:'update',ticket,issueId:'ENG-1',replaceDescription:true,screenshots:[screenshot]})).ok,false);
+  assert.equal(h.calls.length,0);
+});
+test('uncertain image creation retries keep the same issue UUID', async () => {
+  const h=harness(async(_url,_options,n)=>{if(n===1)throw new Error('network');return success;});
+  const message={type:'create',ticket,screenshots:[screenshot]};
+  assert.equal((await h.call(message)).ok,false);
+  assert.equal((await h.call(message)).ok,true);
+  assert.equal(JSON.parse(h.calls[0].body).variables.input.id,JSON.parse(h.calls[1].body).variables.input.id);
+});

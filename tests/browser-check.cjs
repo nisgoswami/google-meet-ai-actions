@@ -408,6 +408,51 @@ async function ticketAction(page, name) {
     await page.getByRole('button',{name:'Prepare prompt',exact:true}).click();
     await page.waitForFunction(() => document.querySelector('textarea[aria-label="Ask Gemini"]')?.value.includes('Compact launcher'));
     assert.equal(await worker.evaluate(() => testRequests.length), writesBeforeCompact);
+    // Image files are previewed locally, removed, and sent only on confirmed create.
+    await page.reload();
+    const screenshotAnswer = page.locator('[data-generation-index="1"]');
+    await screenshotAnswer.getByRole('button',{name:'Review',exact:true}).click();
+    await page.locator('#mode').selectOption('create');
+    await page.locator('#title').fill('Screenshots - Attach a preview');
+    const png = Buffer.from(await page.evaluate(() => {
+      const canvas = document.createElement('canvas'); canvas.width = 8; canvas.height = 8;
+      const ctx = canvas.getContext('2d'); ctx.fillStyle = '#c4b5fd'; ctx.fillRect(0,0,8,8);
+      return canvas.toDataURL('image/png').split(',')[1];
+    }), 'base64');
+    const writesBeforeImages = await worker.evaluate(() => testRequests.length);
+    await page.locator('#screenshot-files').setInputFiles({name:'screen.png',mimeType:'image/png',buffer:png});
+    await page.getByText('1 screenshot attached.',{exact:true}).waitFor();
+    assert.equal(await page.locator('#screenshot-list img').count(),1);
+    assert.equal(await worker.evaluate(() => testRequests.length),writesBeforeImages);
+    await page.getByRole('button',{name:'Remove screenshot 1',exact:true}).click();
+    assert.equal(await page.locator('#screenshot-list img').count(),0);
+    await page.locator('#screenshot-files').setInputFiles({name:'bad.png',mimeType:'image/png',buffer:Buffer.from('not an image')});
+    await page.getByText('The screenshot contents do not match its image format.',{exact:true}).waitFor();
+    assert.equal(await page.locator('#screenshot-list img').count(),0);
+    await page.locator('#screenshot-files').setInputFiles({name:'screen.png',mimeType:'image/png',buffer:png});
+    await page.getByText('1 screenshot attached.',{exact:true}).waitFor();
+    await context.grantPermissions(['clipboard-read','clipboard-write'],{origin:'https://meet.google.com'});
+    await page.evaluate(async base64 => {
+      const bytes = Uint8Array.from(atob(base64), char => char.charCodeAt(0));
+      await navigator.clipboard.write([new ClipboardItem({'image/png':new Blob([bytes],{type:'image/png'})})]);
+    }, png.toString('base64'));
+    await page.locator('#description').focus();
+    await page.keyboard.press('Control+V');
+    await page.getByText('2 screenshots attached.',{exact:true}).waitFor();
+    assert.equal(await page.locator('#screenshot-list img').count(),2);
+    await page.getByRole('button',{name:'Remove screenshot 2',exact:true}).click();
+    await page.locator('#mode').selectOption('update');
+    assert.equal(await page.locator('#screenshot-fields').isVisible(),false);
+    await page.locator('#mode').selectOption('create');
+    await page.getByRole('button',{name:'Create ticket ↗',exact:true}).click();
+    await page.getByText('Created:',{exact:false}).waitFor();
+    const imageRequest = await worker.evaluate(() => testRequests.at(-1));
+    assert.ok(imageRequest.variables.input.description.includes(`![Screenshot 1](data:image/png;base64,${png.toString('base64')})`));
+    const saved = await worker.evaluate(async () => [await chrome.storage.local.get(null), await chrome.storage.session.get(null)]);
+    assert.doesNotMatch(JSON.stringify(saved),/data:image|iVBORw0KGgo/);
+    await screenshotAnswer.getByRole('button',{name:'Review',exact:true}).click();
+    assert.equal(await page.locator('#screenshot-list img').count(),0);
+    await page.getByRole('button',{name:'Cancel',exact:true}).click();
     // Both connection choices remain available. OAuth stores no credentials in
     // UI responses and uses the selected API-returned team rather than a typed ID.
     const oauthSetup = await context.newPage();
@@ -435,6 +480,6 @@ async function ticketAction(page, name) {
     assert.equal(await worker.evaluate(async()=>(await chrome.storage.local.get('linearOAuth')).linearOAuth),undefined);
     // The key cannot be read by the content script's isolated world.
     assert.deepEqual(errors,[]);
-    console.log('PASS: popup before writes, create/replace/append, JSON field separation, Markdown, prompt templates, nested Action → Tickets menu, compact composer actions, 320/390px menu-aligned floating layout and footer rerender, duplicate protection, session ticket links/reload/clear/Gemini summary, and no scripted sends. No real Linear calls.');
+    console.log('PASS: popup before writes, create/replace/append, JSON field separation, Markdown, prompt templates, nested Action → Tickets menu, compact composer actions, 320/390px menu-aligned floating layout and footer rerender, duplicate protection, session ticket links/reload/clear/Gemini summary, screenshot preview/removal/validation/creation, and no scripted sends. No real Linear calls.');
   } finally { await context.close(); fs.rmSync(profile,{recursive:true,force:true}); }
 })().catch(error=>{console.error(error);process.exitCode=1;});

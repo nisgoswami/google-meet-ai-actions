@@ -245,6 +245,8 @@ async function handle(message, sender) {
   const description = String(message.ticket?.description || '').trim();
   if ((message.type === 'create' || message.replaceTitle === true) && !title) throw new Error('Add a title first.');
   if (title.length > 250 || description.length > 50000) throw new Error('Use a title up to 250 characters and a description below 50,000 characters.');
+  const screenshots = MeetLinearCore.validateScreenshots(message.screenshots);
+  if (message.type === 'update' && screenshots.length) throw new Error('Screenshot attachments are available when creating a new ticket.');
   // The source comes from Chrome, never from a page-supplied message.
   const source = MeetLinearCore.meetingUrl(sender.url);
   if (!source) throw new Error('Open a Google Meet call to send a ticket.');
@@ -287,7 +289,7 @@ async function handle(message, sender) {
     if (!result?.issueUpdate?.success || !validIssue(result.issueUpdate.issue)) throw new Error('Linear did not confirm the update.');
     return { issue: result.issueUpdate.issue, updated: true };
   }
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify([config.teamId, source, title, description, properties])));
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify([config.teamId, source, title, description, properties, ...(screenshots.length ? [screenshots] : [])])));
   const fingerprint = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
   const { deliveries = {} } = await chrome.storage.local.get('deliveries');
   let delivery = deliveries[fingerprint];
@@ -301,11 +303,13 @@ async function handle(message, sender) {
     const entries = Object.entries(deliveries).sort((a, b) => b[1].createdAt - a[1].createdAt).slice(0, 100);
     await chrome.storage.local.set({ deliveries: Object.fromEntries(entries) });
   }
+  const screenshotMarkdown = screenshots.map((image, index) => `![Screenshot ${index + 1}](${image})`).join('\n\n');
+  const creationDescription = fullDescription + (screenshotMarkdown ? '\n\n## Screenshots\n\n' + screenshotMarkdown : '');
   let data;
   try {
     data = await graphql(config.key,
       'mutation($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { identifier url } } }',
-      { input: { id: delivery.id, teamId: config.teamId, title, description: fullDescription, ...properties } });
+      { input: { id: delivery.id, teamId: config.teamId, title, description: creationDescription, ...properties } });
   } catch (error) {
     // Reuse the same UUID on retries, even across worker restarts. Never make a
     // second ticket if a network failure hid a successful first creation.

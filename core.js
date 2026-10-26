@@ -1,4 +1,4 @@
-/* Shared pure text handling; no network or page permissions. */
+/* Shared ticket and image validation; no network or page permissions. */
 (function (root) {
   function clean(text) {
     return String(text || '').replace(/\r\n?/g, '\n').replace(/\u200b/g, '').trim();
@@ -75,7 +75,25 @@
     const source = meetingUrl(url);
     return clean(description) + (source ? `\n\n---\nSource: [Google Meet](${source})` : '');
   }
-  const api = { clean, withoutRepeatedTitle, parseTicket, detectUpdate, meetingUrl, descriptionWithSource };
+  // Linear ingests inline image data URLs into its private file storage.
+  const screenshotLimits = { count: 3, bytes: 2 * 1024 * 1024 };
+  function validateScreenshots(images = []) {
+    if (!Array.isArray(images) || images.length > screenshotLimits.count) throw new Error('Attach up to 3 screenshots.');
+    return images.map(image => {
+      if (typeof image !== 'string' || image.length > 4 * Math.ceil(screenshotLimits.bytes / 3) + 30) throw new Error('Each screenshot must be 2 MB or smaller.');
+      const match = image.match(/^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/);
+      if (!match || match[2].length % 4) throw new Error('Choose a PNG, JPEG, or WebP screenshot.');
+      let bytes;
+      try { bytes = atob(match[2]); } catch { throw new Error('Could not read this screenshot.'); }
+      if (!bytes.length || bytes.length > screenshotLimits.bytes) throw new Error('Each screenshot must be 2 MB or smaller.');
+      const valid = match[1] === 'png' ? bytes.startsWith('\x89PNG\r\n\x1a\n')
+        : match[1] === 'jpeg' ? bytes.startsWith('\xff\xd8\xff')
+        : bytes.startsWith('RIFF') && bytes.slice(8,12) === 'WEBP';
+      if (!valid || btoa(bytes) !== match[2]) throw new Error('The screenshot contents do not match its image format.');
+      return image;
+    });
+  }
+  const api = { clean, withoutRepeatedTitle, parseTicket, detectUpdate, meetingUrl, descriptionWithSource, screenshotLimits, validateScreenshots };
   root.MeetLinearCore = api;
   if (typeof module !== 'undefined') module.exports = api;
 })(globalThis);

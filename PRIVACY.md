@@ -8,6 +8,8 @@ Google Meet AI Actions transfers user-selected conversation text into Linear iss
 
 The extension locally reads message text in the open Google Meet Gemini panel to display message controls and prepare the issue you select. When you click Send, Create, or Update, the selected title, description, relevant issue identifier, selected status/assignee IDs, and Meet call link are transmitted directly over HTTPS to Linear’s API. Linear handles that data under its own terms and privacy policy. Gemini itself remains a Google service governed by Google’s policies.
 
+Screenshots that you explicitly choose or paste into the creation dialog are previewed in memory and transmitted directly to Linear only when you confirm Create. Linear stores them as private issue images. The extension does not capture your screen automatically, save image data in browser storage, or include images in session-summary prompts. Closing the dialog clears selected images.
+
 Opening Send or Review checks issue references and exact titles against the configured team to detect an existing ticket. The extension also reads that team’s workflow statuses and active member names/IDs for the status and assignee selectors. Creation defaults store only the selected status/assignee IDs locally.
 
 When you open the update picker, search terms are sent directly to Linear and recent ticket identifiers, titles, and timestamps are fetched for your configured team. Choosing a ticket fetches its current title, description, and update timestamp. That content is inserted into the Gemini composer, and is sent to Google only when you submit the prepared prompt. Ticket reads require team-restricted Read permission. Before writing a selected update, the extension reads it again to check for newer edits.
