@@ -1,11 +1,14 @@
 import './core.js';
 import './prompts.js';
+import './oauth-config.js';
+import './oauth.js';
 
 const trustedStorage = chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
 const API = 'https://api.linear.app/graphql';
 let queue = Promise.resolve();
 
 async function graphql(key, query, variables = {}) {
+  if (key === 'oauth') key = `Bearer ${await LinearOAuth.accessToken()}`;
   let response;
   try {
     response = await fetch(API, {
@@ -19,20 +22,20 @@ async function graphql(key, query, variables = {}) {
   } catch {
     throw new Error('Linear could not be reached. If you were sending, retry the same ticket to check its status safely.');
   }
-  if (response.status === 401 || response.status === 403) throw new Error('Linear rejected this key. Check its permissions in extension settings.');
+  if (response.status === 401 || response.status === 403) throw new Error('Linear rejected this connection. Sign in again or check your API key permissions in extension settings.');
   if (response.status === 429) throw new Error('Linear is rate limiting requests. Wait a minute and retry.');
   if (!response.ok) throw new Error(`Linear returned HTTP ${response.status}. Retry the same ticket to check its status.`);
   let body;
   try { body = await response.json(); } catch { throw new Error('Linear returned an unreadable response. Retry the same ticket to check its status.'); }
   if (body.errors?.length) {
     // Keep remote messages out of the page; do not echo request contents or keys.
-    throw new Error(query.trim().startsWith('query') ? 'Could not read Linear tickets. The picker needs Read permission on the same team, in addition to Create issues. Check the key in extension settings.' : 'Linear rejected the request. Check the API key, team access, and ticket fields.');
+    throw new Error(query.trim().startsWith('query') ? 'Could not read Linear tickets. The picker needs Read permission on the configured team. Check your connection in extension settings.' : 'Linear rejected the request. Check your connection, team access, and ticket fields.');
   }
   return body.data;
 }
 
 function safeConfig(config) {
-  return { connected: Boolean(config?.key && config?.teamId), teamName: config?.teamName || '', teamKey: config?.teamKey || '', teamId: config?.teamId || '', workspaceName: config?.workspaceName || '' };
+  return { connected: Boolean(config?.key && config?.teamId), authType:config?.authType || 'apiKey', teamName: config?.teamName || '', teamKey: config?.teamKey || '', teamId: config?.teamId || '', workspaceName: config?.workspaceName || '' };
 }
 
 function validIssue(issue) {
@@ -87,6 +90,50 @@ async function handle(message, sender) {
   if (!isOptions && !isMeet) throw new Error('This action is only available in Meet or extension settings.');
   const { config } = await chrome.storage.local.get('config');
   if (message.type === 'status') return safeConfig(config);
+  if (message.type === 'oauthConnect' && isOptions) {
+    const old = (await chrome.storage.session.get('oauthCandidate')).oauthCandidate;
+    if (old) await LinearOAuth.revoke(old.tokens);
+    await chrome.storage.session.remove('oauthCandidate');
+    const tokens = await LinearOAuth.authorize();
+    try {
+      const teams = []; let after = null, workspaceName = '';
+      do {
+        const data = await graphql(`Bearer ${tokens.accessToken}`, 'query($after: String) { organization { name } teams(first: 100, after: $after) { nodes { id name key } pageInfo { hasNextPage endCursor } } }', {after});
+        if (!data?.organization?.name || !Array.isArray(data.teams?.nodes)) throw new Error('Could not load your Linear teams.');
+        workspaceName = data.organization.name;
+        for (const team of data.teams.nodes) {
+          if (!/^[a-f0-9-]{36}$/i.test(team.id || '') || !/^[A-Z][A-Z0-9_]{0,19}$/i.test(team.key || '') || !team.name) throw new Error('Linear returned an invalid team.');
+          teams.push({id:team.id,name:team.name,key:team.key});
+        }
+        const page = data.teams.pageInfo;
+        if (page?.hasNextPage && (!page.endCursor || page.endCursor === after)) throw new Error('Could not load the next page of Linear teams.');
+        after = page?.hasNextPage ? page.endCursor : null;
+      } while (after);
+      if (!teams.length) throw new Error('No accessible teams were found in this Linear workspace.');
+      const candidate = {id:crypto.randomUUID(),createdAt:Date.now(),tokens,workspaceName,teams};
+      await chrome.storage.session.set({oauthCandidate:candidate});
+      return {candidateId:candidate.id,workspaceName,teams};
+    } catch (error) { await LinearOAuth.revoke(tokens); throw error; }
+  }
+  if (message.type === 'oauthSelectTeam' && isOptions) {
+    const {oauthCandidate:candidate} = await chrome.storage.session.get('oauthCandidate');
+    if (!candidate || candidate.id !== message.candidateId || Date.now()-candidate.createdAt > 600000) throw new Error('Sign in with Linear again to select a team.');
+    const team = candidate.teams.find(team => team.id === message.teamId);
+    if (!team) throw new Error('Choose one of the teams returned by Linear.');
+    const next = {key:'oauth',authType:'oauth',teamId:team.id,teamKey:team.key.toUpperCase(),teamName:team.name,workspaceName:candidate.workspaceName};
+    const previous = (await chrome.storage.local.get('linearOAuth')).linearOAuth;
+    await chrome.storage.local.set({config:next,linearOAuth:candidate.tokens});
+    await chrome.storage.session.remove('oauthCandidate');
+    teamOptionsCache = null;
+    if (previous && previous.refreshToken !== candidate.tokens.refreshToken) await LinearOAuth.revoke(previous);
+    return safeConfig(next);
+  }
+  if (message.type === 'oauthCancel' && isOptions) {
+    const {oauthCandidate} = await chrome.storage.session.get('oauthCandidate');
+    await chrome.storage.session.remove('oauthCandidate');
+    if (oauthCandidate) await LinearOAuth.revoke(oauthCandidate.tokens);
+    return {};
+  }
   if (['getTeamOptions','saveIssueDefaults'].includes(message.type)) {
     if (!config?.key || !config.teamId) throw new Error('Connect Linear in extension settings first.');
     const options=await teamOptions(config);
@@ -127,14 +174,24 @@ async function handle(message, sender) {
     const teamKey = String(message.teamKey || '').trim().toUpperCase();
     if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(teamId)) throw new Error('Enter the team UUID from Linear’s Copy model UUID command.');
     if (!/^[A-Z][A-Z0-9_]{0,19}$/.test(teamKey)) throw new Error('Enter your team’s issue prefix, such as ENG.');
-    const next = { key, teamId, teamKey, teamName: String(message.teamName || teamKey).trim().slice(0,100), workspaceName: String(message.workspaceName || 'Linear').trim().slice(0,100) };
+    const next = { key, authType:'apiKey', teamId, teamKey, teamName: String(message.teamName || teamKey).trim().slice(0,100), workspaceName: String(message.workspaceName || 'Linear').trim().slice(0,100) };
     await chrome.storage.local.set({ config: next });
+    const {linearOAuth} = await chrome.storage.local.get('linearOAuth');
+    if (linearOAuth) { await LinearOAuth.revoke(linearOAuth); await chrome.storage.local.remove('linearOAuth'); }
+    const {oauthCandidate} = await chrome.storage.session.get('oauthCandidate');
+    if (oauthCandidate) { await LinearOAuth.revoke(oauthCandidate.tokens); await chrome.storage.session.remove('oauthCandidate'); }
+    teamOptionsCache = null;
     return safeConfig(next);
   }
   if (message.type === 'disconnect' && isOptions) {
-    await chrome.storage.local.remove(['config', 'deliveries','issueDefaults']);
-    await chrome.storage.session.remove('candidate');
-    return {};
+    const {linearOAuth} = await chrome.storage.local.get('linearOAuth');
+    const revoked = linearOAuth ? await LinearOAuth.revoke(linearOAuth) : true;
+    const {oauthCandidate} = await chrome.storage.session.get('oauthCandidate');
+    if (oauthCandidate) await LinearOAuth.revoke(oauthCandidate.tokens);
+    await chrome.storage.local.remove(['config', 'deliveries','issueDefaults','linearOAuth']);
+    await chrome.storage.session.remove(['candidate','oauthCandidate']);
+    teamOptionsCache = null;
+    return {revoked};
   }
   if (!['create', 'update', 'listIssues', 'getIssue','findMatchingIssues'].includes(message.type) || !isMeet) throw new Error('Unsupported action.');
   if (!config?.key || !config.teamId) throw new Error('Connect Linear in extension settings first.');

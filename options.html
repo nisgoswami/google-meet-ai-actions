@@ -6,6 +6,10 @@
   <h1>Turn the discussion into a ticket.</h1>
   <p>Connect once. Send and Review buttons appear on messages in your Meet Gemini panel.</p>
   <section id="current" hidden><strong id="destination"></strong><p>Configured on this browser profile.</p><button id="disconnect" class="secondary">Disconnect</button></section>
+  <section id="oauth-connection"><h2>Sign in with Linear</h2><p>Approve access in Linear, then choose the team for your tickets.</p><button id="oauth-connect" type="button">Sign in with Linear</button>
+    <form id="oauth-team-form" hidden><p id="oauth-workspace"></p><label for="oauth-team">Team</label><select id="oauth-team" required></select><button id="oauth-save" type="submit">Use this team</button><button id="oauth-cancel" type="button" class="secondary">Cancel connection</button></form>
+  </section>
+  <details id="api-key-connection"><summary>Bring your own API key</summary>
   <form id="connect-form">
     <label for="key">Linear personal API key</label>
     <input id="key" type="password" autocomplete="off" spellcheck="false" placeholder="lin_api_…" required>
@@ -17,6 +21,7 @@
     <p class="hint">In Linear, open your team, press Ctrl/Cmd+K, choose <strong>Copy model UUID</strong>, and select the Team entry. Entering this once avoids granting workspace Read access.</p>
     <button id="connect" type="submit">Save connection</button>
   </form>
+  </details>
   <p id="status" role="status" aria-live="polite"></p>
   <section id="issue-defaults"><h2>New ticket defaults</h2><p>Choose a backlog/status and assignee. You can override both in Send to Linear. Existing tickets keep their status and assignee unless you explicitly change them.</p><button id="load-defaults" class="secondary">Load team statuses and people</button><form id="defaults-form"><label for="default-state">Default status</label><select id="default-state"><option value="">Team default</option></select><label for="default-assignee">Default assignee</label><select id="default-assignee"><option value="">Unassigned</option></select><button type="submit">Save ticket defaults</button></form><p id="defaults-status" role="status"></p></section>
   <section id="prompt-settings"><h2>Gemini prompt templates</h2>
@@ -25,5 +30,5 @@
   <form id="prompts-form"><label for="create-prompt">Ask for ticket prompt</label><textarea id="create-prompt" rows="12" maxlength="12000" required></textarea><button id="preset-create" type="button" class="secondary">Fill ticket preset</button>
   <label for="update-prompt">Ask for update prompt</label><textarea id="update-prompt" rows="15" maxlength="12000" required></textarea><button id="preset-update" type="button" class="secondary">Fill update preset</button><br><button type="submit">Save prompt templates</button><p id="prompts-status" role="status"></p></form></section>
   <section class="how"><h2>In your next call</h2><ol><li>Click <strong>Ask for ticket</strong> and enter the topic discussed in the call.</li><li>Click <strong>Send to Linear</strong> on that message, choose an action, and confirm.</li><li>Use <strong>Review</strong> to edit it, or use <strong>Ask for update</strong> to search recent tickets and prepare an update from the selected ticket.</li></ol></section>
-  <p class="hint">Your key stays in this extension’s local browser storage. Ticket searches go directly to Linear. A selected ticket is copied into Ask Gemini only when you choose it. No audio, captions, or meeting history are recorded. Your key is not synced or exposed to Meet.</p>
+  <p class="hint">Your login tokens or API key stay in this extension’s local browser storage. Ticket searches go directly to Linear. A selected ticket is copied into Ask Gemini only when you choose it. No audio, captions, or meeting history are recorded. Credentials are not synced or exposed to Meet.</p>
 </main><script src="prompts.js"></script><script src="options.js"></script></body></html>

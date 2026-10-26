@@ -3,9 +3,10 @@
   "name": "Google Meet AI Actions",
   "version": "1.4.0",
   "description": "Turn Google Meet Gemini discussions into Linear tickets. Review, assign, set status, and update issues. No separate AI API key.",
-  "minimum_chrome_version": "114",
+  "minimum_chrome_version": "116",
   "permissions": [
-    "storage"
+    "storage",
+    "identity"
   ],
   "host_permissions": [
     "https://api.linear.app/*"
@@ -44,5 +45,6 @@
     }
   },
   "options_page": "options.html",
-  "homepage_url": "https://github.com/nisgoswami/google-meet-ai-actions"
+  "homepage_url": "https://github.com/nisgoswami/google-meet-ai-actions",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAsKnMJEsMv5ZmNAaCwjyQxxE823DqjGxKj5TDHWfk5R45w4ZbOv8CsS8n+wv+EH/pJqHfmxP2l/on4jHqdgdms6Cr/xuGJDy4V9hZQYHKVohLaI/g7bmFEHsCVUQsN8BW4xp2MDEeJmqAeGDKu6jXdpRHBaYoN5eeygqlPYsWN9txthr6x7kUYuweWF6P9e5Msy3T6HGdm5TmMpamP8fvEt5KvOCADMm8vQzwiS9sYiovBteMAw7AGjJJ6kewKgqQF5U9u18T4IB1BJgXtd8dijKPwi9SDG1P/eFwe7d6yKMmjGD0jnKV1VC1kLBOZ38f9wxv45GNuPrTih2Sw7z0twIDAQAB"
 }

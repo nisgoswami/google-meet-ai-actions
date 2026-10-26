@@ -6,3 +6,4 @@ button { border: 0; border-radius: 8px; padding: 12px 20px; font: 600 14px syste
 .hint { font-size: 13px; } a { color: #b9b5ff; } .how { border-top: 1px solid #33343d; padding-top: 20px; } h2 { font-size: 18px; } li { padding-bottom: 8px; color: #b9b9c7; } #status { min-height: 24px; color: #c4c0ff; } [hidden] { display: none !important; }
 
 textarea {width:100%;padding:12px;border:1px solid #40404d;border-radius:8px;color:#fff;background:#1c1d24;font:13px/1.5 ui-monospace,monospace;resize:vertical} #prompts-form label{margin-top:24px}
+details {margin:32px 0;padding:20px;border:1px solid #40404d;border-radius:10px} summary {cursor:pointer;font-weight:600} #oauth-connection {padding:20px;border:1px solid #55517a;border-radius:10px} #oauth-connection h2 {margin-top:0}

@@ -28,6 +28,7 @@ body{margin:0;background:#161718;color:#eee;font:15px/1.6 Arial}aside{position:a
     const setup=await context.newPage();
     await setup.goto(`chrome-extension://${id}/options.html`);
     setup.on('pageerror',err=>errors.push(err.message));
+    await setup.getByText('Bring your own API key',{exact:true}).click();
     await setup.locator('#key').fill('lin_api_TEST');
     await setup.locator('#workspace').fill('Example');
     await setup.locator('#team-name').fill('Engineering');
@@ -43,14 +44,28 @@ body{margin:0;background:#161718;color:#eee;font:15px/1.6 Arial}aside{position:a
     await setup.reload();
     assert.match(await setup.locator('#create-prompt').inputValue(),/Custom instruction/);
     await worker.evaluate(()=>{
-      globalThis.testRequests=[]; globalThis.testReadRequests=[];
+      globalThis.testRequests=[]; globalThis.testReadRequests=[]; globalThis.testOAuthRequests=[];
+      chrome.identity.launchWebAuthFlow=async ({url}) => {
+        const authorization = new URL(url);
+        const callback = new URL(authorization.searchParams.get('redirect_uri'));
+        callback.searchParams.set('state',authorization.searchParams.get('state'));
+        callback.searchParams.set('code','TEST_CODE');
+        return callback.href;
+      };
       globalThis.fetch=async(url,options)=>{
+        if(url.includes('/oauth/')) {
+          const form=Object.fromEntries(new URLSearchParams(options.body));
+          globalThis.testOAuthRequests.push({url,form});
+          return new Response(JSON.stringify(url.endsWith('/token') ? {access_token:'TEST_ACCESS',refresh_token:'TEST_REFRESH',token_type:'Bearer',expires_in:3600} : {}),{status:200,headers:{'Content-Type':'application/json'}});
+        }
         const body=JSON.parse(options.body);
         if (body.query.startsWith('query')) {
           globalThis.testReadRequests.push(body);
           const issue={identifier:'ENG-42',title:'Checkout - Fix payment retries',description:'## Existing requirements\n- Preserve payment checks.',createdAt:'2026-10-23T10:00:00Z',updatedAt:'2026-10-23T11:00:00Z',url:'https://linear.app/example/issue/ENG-42',team:{id:'00000000-0000-4000-8000-000000000001'}};
           let data;
-          if(body.query.includes('team(id:')) {
+          if(body.query.includes('organization { name }')) {
+            data={organization:{name:'Personal test workspace'},teams:{nodes:[{id:'00000000-0000-4000-8000-000000000001',name:'Personal team',key:'ENG'}],pageInfo:{hasNextPage:false}}};
+          } else if(body.query.includes('team(id:')) {
             data={team:{id:'00000000-0000-4000-8000-000000000001',states:{nodes:[{id:'backlog',name:'Backlog',type:'backlog',position:0},{id:'started',name:'In Progress',type:'started',position:1}]},members:{nodes:[{id:'member-1',name:'Alex',displayName:'Alex',active:true},{id:'member-2',name:'Sam',displayName:'Sam',active:true}],pageInfo:{hasNextPage:false,endCursor:null}}}};
           } else if(body.query.includes('issues(')){
             const newer={...issue,identifier:'ENG-43',title:'Checkout - Improve receipts',url:'https://linear.app/example/issue/ENG-43',createdAt:'2026-10-24T10:00:00Z'};
@@ -361,6 +376,31 @@ body{margin:0;background:#161718;color:#eee;font:15px/1.6 Arial}aside{position:a
     await page.getByRole('button',{name:'Prepare prompt',exact:true}).click();
     await page.waitForFunction(() => document.querySelector('textarea[aria-label="Ask Gemini"]')?.value.includes('Compact launcher'));
     assert.equal(await worker.evaluate(() => testRequests.length), writesBeforeCompact);
+    // Both connection choices remain available. OAuth stores no credentials in
+    // UI responses and uses the selected API-returned team rather than a typed ID.
+    const oauthSetup = await context.newPage();
+    oauthSetup.on('pageerror',err=>errors.push(err.message));
+    await oauthSetup.goto(`chrome-extension://${id}/options.html`);
+    await oauthSetup.getByRole('button',{name:'Sign in with Linear',exact:true}).waitFor();
+    await oauthSetup.getByText('Bring your own API key',{exact:true}).waitFor();
+    await oauthSetup.screenshot({path:'/tmp/threadport-login-options.png'});
+    await oauthSetup.getByRole('button',{name:'Sign in with Linear',exact:true}).click();
+    await oauthSetup.getByText('Signed in. Choose the team to use for tickets.',{exact:true}).waitFor();
+    assert.equal(await worker.evaluate(async()=>(await chrome.storage.local.get('config')).config.key),'lin_api_TEST');
+    await oauthSetup.locator('#oauth-team').selectOption('00000000-0000-4000-8000-000000000001');
+    await oauthSetup.getByRole('button',{name:'Use this team',exact:true}).click();
+    await oauthSetup.getByText('Connected with Linear login. Return to Meet.',{exact:true}).waitFor();
+    const oauthStatus = await oauthSetup.evaluate(()=>chrome.runtime.sendMessage({type:'status'}));
+    assert.equal(oauthStatus.authType,'oauth');assert.equal(oauthStatus.teamName,'Personal team');
+    assert.doesNotMatch(JSON.stringify(oauthStatus),/TEST_ACCESS|TEST_REFRESH/);
+    await worker.evaluate(async()=>{const {linearOAuth}=await chrome.storage.local.get('linearOAuth');linearOAuth.expiresAt=0;await chrome.storage.local.set({linearOAuth});});
+    assert.equal((await oauthSetup.evaluate(()=>chrome.runtime.sendMessage({type:'getTeamOptions'}))).ok,true);
+    const tokenRequests = await worker.evaluate(()=>testOAuthRequests);
+    assert.equal(tokenRequests.length,2);assert.equal(tokenRequests[1].form.grant_type,'refresh_token');
+    assert.ok(tokenRequests.every(request=>!Object.hasOwn(request.form,'client_secret')));
+    await oauthSetup.getByRole('button',{name:'Disconnect',exact:true}).click();
+    await oauthSetup.getByText('Disconnected. You can also manage access in Linear settings.',{exact:true}).waitFor();
+    assert.equal(await worker.evaluate(async()=>(await chrome.storage.local.get('linearOAuth')).linearOAuth),undefined);
     // The key cannot be read by the content script's isolated world.
     assert.deepEqual(errors,[]);
     console.log('PASS: popup before writes, create/replace/append, JSON field separation, Markdown, prompt templates, compact composer actions, 320/390px menu-aligned floating layout and footer rerender, duplicate protection, and no scripted sends. No real Linear calls.');

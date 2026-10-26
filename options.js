@@ -1,4 +1,5 @@
 const $ = id => document.getElementById(id);
+let oauthCandidateId;
 async function message(payload) {
   const result = await chrome.runtime.sendMessage(payload);
   if (!result?.ok) throw new Error(result?.error || 'The extension is unavailable. Reload this page.');
@@ -22,16 +23,50 @@ $('connect-form').addEventListener('submit', async event => {
     const result = await message({ type: 'connect', key: $('key').value, workspaceName: $('workspace').value, teamName: $('team-name').value, teamKey: $('team-key').value, teamId: $('team-id').value });
     $('key').value = '';
     showConfig(result);
+    $('oauth-team-form').hidden = true; oauthCandidateId = null;
     $('status').textContent = 'Saved. Return to Meet. The key is verified by Linear when you send a ticket.';
   } catch (err) { $('status').textContent = err.message; }
   finally { $('connect').disabled = false; }
 });
 $('disconnect').addEventListener('click', async () => {
   try {
-    await message({ type: 'disconnect' });
+    const result = await message({ type: 'disconnect' });
     showConfig({ connected: false });
-    $('status').textContent = 'Disconnected. You can revoke the key in Linear settings.';
+    $('oauth-team-form').hidden = true;
+    oauthCandidateId = null;
+    $('status').textContent = result.revoked === false ? 'Disconnected locally. Remove this app’s authorization in Linear settings to revoke access.' : 'Disconnected. You can also manage access in Linear settings.';
   } catch (err) { $('status').textContent = err.message; }
+});
+
+$('oauth-connect').addEventListener('click', async () => {
+  $('oauth-connect').disabled = true;
+  $('status').textContent = 'Complete sign-in in the Linear window…';
+  try {
+    const result = await message({type:'oauthConnect'});
+    oauthCandidateId = result.candidateId;
+    $('oauth-team').replaceChildren();
+    for (const team of result.teams) {
+      const option = document.createElement('option'); option.value = team.id; option.textContent = `${team.name} (${team.key})`; $('oauth-team').append(option);
+    }
+    $('oauth-workspace').textContent = result.workspaceName;
+    $('oauth-team-form').hidden = false;
+    $('status').textContent = 'Signed in. Choose the team to use for tickets.';
+    $('oauth-team').focus();
+  } catch (error) { $('status').textContent = error.message; }
+  finally { $('oauth-connect').disabled = false; }
+});
+$('oauth-team-form').addEventListener('submit', async event => {
+  event.preventDefault(); $('oauth-save').disabled = true;
+  try {
+    showConfig(await message({type:'oauthSelectTeam',candidateId:oauthCandidateId,teamId:$('oauth-team').value}));
+    $('oauth-team-form').hidden = true; oauthCandidateId = null;
+    $('status').textContent = 'Connected with Linear login. Return to Meet.';
+  } catch (error) { $('status').textContent = error.message; }
+  finally { $('oauth-save').disabled = false; }
+});
+$('oauth-cancel').addEventListener('click', async () => {
+  try { await message({type:'oauthCancel'}); $('oauth-team-form').hidden = true; oauthCandidateId = null; $('status').textContent = 'Connection cancelled.'; }
+  catch (error) { $('status').textContent = error.message; }
 });
 
 message({type:'getPrompts'}).then(({prompts})=>{

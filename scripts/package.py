@@ -7,7 +7,7 @@ root = Path(__file__).resolve().parent.parent
 manifest = json.loads((root / 'manifest.json').read_text())
 files = [
     'markdown.js', 'vendor/turndown.js', 'vendor/turndown.LICENSE',
-    'prompts.js', 'manifest.json', 'core.js', 'content.js', 'background.js',
+    'prompts.js', 'manifest.json', 'core.js', 'content.js', 'background.js', 'oauth.js', 'oauth-config.js',
     'adapters/google-meet.js', 'options.html', 'options.css', 'options.js',
     'LICENSE', 'PRIVACY.md',
     *[f'icons/icon-{size}.png' for size in (16, 32, 48, 128)],

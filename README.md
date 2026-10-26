@@ -20,6 +20,7 @@ For existing work, **Ask for update** opens a searchable list of your team's Lin
 | --- | --- |
 | Meeting discussion to Linear issue | Transfers the selected Gemini message into separate title and Markdown description fields. |
 | Review before writing | Send opens a dialog with Create, Replace, and Append actions. No ticket write occurs on the first click. |
+| Choose how to connect | Sign in with Linear through its permission screen, or bring your own team-restricted personal API key. OAuth uses PKCE with no developer backend or client secret in the extension. |
 | Searchable ticket updates | Search titles, descriptions, or an exact issue ID. Recent tickets are ordered by creation date, newest first, with pagination. |
 | Update detection | Recognizes team issue IDs, Linear issue links, selected update tickets, explicit update instructions, and exact title matches. Ambiguous matches require selection. |
 | Backlog and status | Load the team's real workflow states, save a default, and override it before sending. Backlog is selected initially when available. |
@@ -38,10 +39,11 @@ Screenshots use fictional meeting and ticket data.
 
 ## Requirements
 
-- Desktop Chrome or Chromium 114 or later.
+- Desktop Chrome or Chromium 116 or later.
 - An eligible Google account with **Ask Gemini in Google Meet** enabled.
-- A Linear account, a target team, and a personal API key.
-- **Read** plus **Create issues** access, restricted to that team, for ticket search, status/assignee selectors, and the complete update flow. Linear's Create issues capability includes updating issues. General Write, Comments, and Admin are not required.
+- A Linear account and target team. Choose Linear login or your own personal API key.
+- Linear login requests **Read** and **Write** so it can read teams and tickets and create/update issues. You approve this on Linear's own consent screen, then choose a team in extension settings. The extension restricts its ticket operations to that team.
+- For your own API key, choose **Read** plus **Create issues**, restricted to that team, for the complete flow. Linear's API-key Create issues capability includes updating issues. General Write, Comments, and Admin are not required for API keys.
 
 Creation and manual description replacement can work with Create issues alone, but the read-based features above require Read permission. Android and iOS Meet apps are not supported.
 
@@ -49,7 +51,7 @@ Creation and manual description replacement can work with Create issues alone, b
 
 ### 1. Load the extension
 
-Until a Chrome Web Store listing is available:
+Install from the [Chrome Web Store](https://chromewebstore.google.com/detail/bhpafemdklaoobpenkfnhbdabahinfbm), or load the source locally:
 
 ```sh
 git clone https://github.com/nisgoswami/google-meet-ai-actions.git
@@ -60,6 +62,10 @@ Open `chrome://extensions` in the profile you use for Meet. Enable **Developer m
 ### 2. Connect Linear
 
 Open **Google Meet AI Actions settings** from the extension's toolbar icon.
+
+**Sign in with Linear:** click the sign-in button, approve the permissions on Linear, choose the team returned by Linear, and click **Use this team**. Access tokens refresh automatically. Disconnect removes stored credentials and attempts to revoke the login with Linear.
+
+**Bring your own API key:** expand this option in extension settings and follow these steps:
 
 1. Sign in to the correct Linear workspace, open the workspace menu in the top left, and choose **Settings**.
 2. Under **Personal**, open **Security & access**. You can also open [Security & access directly](https://linear.app/settings/account/security).
@@ -74,7 +80,7 @@ Open **Google Meet AI Actions settings** from the extension's toolbar icon.
 
 This is a Linear **API key**, not an AI/model key. No Gemini API key, OpenAI API key, or paid extension subscription is needed. Google’s own Ask Gemini availability and subscription requirements still apply.
 
-To change permissions later, return to **Personal API keys**, open the key’s settings, choose **Edit API key**, and save only the required permissions and team restriction. Revoke the key there if it is compromised. The extension does not embed or publish it.
+To change API-key permissions later, return to **Personal API keys**, open the key’s settings, choose **Edit API key**, and save only the required permissions and team restriction. Revoke the key there if it is compromised. For OAuth, manage the app's access in Linear's connected applications. The extension does not embed or publish user credentials.
 
 ### 3. Set ticket defaults and prompts
 

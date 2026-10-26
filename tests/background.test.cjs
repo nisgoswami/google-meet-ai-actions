@@ -6,7 +6,7 @@ const crypto = require('node:crypto').webcrypto;
 const core = require('../core.js');
 const prompts = require('../prompts.js');
 
-function harness(fetchImpl) {
+function harness(fetchImpl, oauth = {}) {
   const data = { config: {key:'lin_api_TEST',teamId:'fixed-team',teamName:'Engineering',teamKey:'ENG',workspaceName:'Example'} };
   let handler;
   const calls = [];
@@ -23,9 +23,9 @@ function harness(fetchImpl) {
       action: {onClicked:{addListener:()=>{}}}
     },
     fetch: async (url, options) => { calls.push({url,...options});return fetchImpl(url, options, calls.length); },
-    crypto, URL, TextEncoder, AbortSignal, MeetLinearCore:core, ThreadportPrompts:prompts, console
+    crypto, URL, TextEncoder, AbortSignal, MeetLinearCore:core, ThreadportPrompts:prompts, LinearOAuth:oauth, console
   });
-  vm.runInContext(fs.readFileSync(require.resolve('../background.js'),'utf8').replace("import './core.js';",'').replace("import './prompts.js';",''),context);
+  vm.runInContext(fs.readFileSync(require.resolve('../background.js'),'utf8').replace(/^import .*;\n/gm,''),context);
   return {data,calls,call: (message,sender={url:'https://meet.google.com/meet/rap-aqpk-umc',tab:{id:1}}) => new Promise(resolve=>handler(message,sender,resolve))};
 }
 const success = {ok:true,status:200,json:async()=>({data:{issueCreate:{success:true,issue:{identifier:'ENG-1',url:'https://linear.app/example/issue/ENG-1'}}}})};
@@ -178,4 +178,30 @@ test('exact-title update matching is team-scoped',async()=>{
   });
   const result=await h.call({type:'findMatchingIssues',title:'Feature - Improve layout'});
   assert.equal(result.issues[0].identifier,'ENG-12');
+});
+
+test('OAuth is settings-only, keeps tokens private, and binds the saved team to Linear results', async () => {
+  const team={id:'00000000-0000-4000-8000-000000000001',name:'Personal team',key:'NIS'};
+  let authorized=0;
+  const h=harness(async(_url,options)=>JSON.parse(options.body).query.includes('organization { name }') ? {
+    ok:true,status:200,json:async()=>({data:{organization:{name:'Personal'},teams:{nodes:[team],pageInfo:{hasNextPage:false}}}})
+  } : success,{
+    authorize:async()=>{authorized++;return {accessToken:'private-access',refreshToken:'private-refresh',expiresAt:Date.now()+3600000};},
+    accessToken:async()=> 'private-access',revoke:async()=>true
+  });
+  assert.equal((await h.call({type:'oauthConnect'})).ok,false);
+  assert.equal(authorized,0);
+  const sender={url:'chrome-extension://test/options.html'};
+  const result=await h.call({type:'oauthConnect'},sender);
+  assert.equal(result.ok,true);
+  assert.doesNotMatch(JSON.stringify(result),/private-access|private-refresh/);
+  assert.equal(h.data.config.key,'lin_api_TEST','A pending login does not replace the current connection');
+  assert.equal((await h.call({type:'oauthSelectTeam',candidateId:result.candidateId,teamId:'foreign-team'},sender)).ok,false);
+  const saved=await h.call({type:'oauthSelectTeam',candidateId:result.candidateId,teamId:team.id},sender);
+  assert.equal(saved.connected,true);assert.equal(saved.authType,'oauth');
+  assert.doesNotMatch(JSON.stringify(saved),/private-access|private-refresh/);
+  assert.equal(h.data.config.key,'oauth');assert.equal(h.data.linearOAuth.refreshToken,'private-refresh');
+  const created=await h.call({type:'create',ticket});assert.equal(created.ok,true);
+  assert.equal(h.calls.at(-1).headers.Authorization,'Bearer private-access');
+  const disconnected=await h.call({type:'disconnect'},sender);assert.equal(disconnected.ok,true);assert.equal(h.data.linearOAuth,undefined);
 });
