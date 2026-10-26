@@ -3,7 +3,6 @@ name: Release extension
 on:
   push:
     branches: [main]
-    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
@@ -39,9 +38,43 @@ jobs:
           path: dist/google-meet-ai-actions-*.zip
           if-no-files-found: error
 
-  publish:
+  release-please:
     needs: test
-    if: github.repository == 'nisgoswami/google-meet-ai-actions' && (github.ref_type == 'tag' || github.event_name == 'workflow_dispatch')
+    if: github.repository == 'nisgoswami/google-meet-ai-actions' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      actions: write
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - id: release
+        uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+      - name: Run CI on the generated release PR
+        if: steps.release.outputs.prs_created == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_PRS: ${{ steps.release.outputs.prs }}
+        run: |
+          for number in $(node -e 'for (const pr of JSON.parse(process.env.RELEASE_PRS || "[]")) console.log(pr.number)'); do
+            branch=$(gh api "repos/$GH_REPO/pulls/$number" --jq '.head.ref')
+            gh workflow run release.yml --repo "$GH_REPO" --ref "$branch"
+          done
+
+  publish:
+    needs: [test, release-please]
+    if: >-
+      always() && github.repository == 'nisgoswami/google-meet-ai-actions' && needs.test.result == 'success' &&
+      (needs.release-please.outputs.release_created == 'true' ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'))
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     concurrency:
@@ -52,10 +85,14 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name || github.sha }}
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24'
       - run: node scripts/validate-release.mjs
+        env:
+          EXPECTED_RELEASE_TAG: ${{ needs.release-please.outputs.tag_name }}
       - run: python3 scripts/package.py
       - name: Authenticate with short-lived Google credentials
         id: google
@@ -76,20 +113,16 @@ jobs:
           CWS_PUBLISHER_ID: ${{ vars.CWS_PUBLISHER_ID }}
           CWS_EXTENSION_ID: ${{ vars.CWS_EXTENSION_ID }}
       - name: Submit tagged version for store review
-        if: github.ref_type == 'tag'
+        if: needs.release-please.outputs.release_created == 'true'
         run: node scripts/publish-store.mjs
         env:
           CWS_ACCESS_TOKEN: ${{ steps.google.outputs.access_token }}
           CWS_PUBLISHER_ID: ${{ vars.CWS_PUBLISHER_ID }}
           CWS_EXTENSION_ID: ${{ vars.CWS_EXTENSION_ID }}
-      - name: Create GitHub release with ZIP
-        if: github.ref_type == 'tag'
+      - name: Attach ZIP to the GitHub release
+        if: needs.release-please.outputs.release_created == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ needs.release-please.outputs.tag_name }}
         run: |
-          if gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" dist/google-meet-ai-actions-*.zip --clobber
-          else
-            gh release create "$RELEASE_TAG" dist/google-meet-ai-actions-*.zip --verify-tag --generate-notes --title "$RELEASE_TAG"
-          fi
+          gh release upload "$RELEASE_TAG" dist/google-meet-ai-actions-*.zip --clobber
