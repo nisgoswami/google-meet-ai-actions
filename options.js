@@ -1,5 +1,23 @@
 const $ = id => document.getElementById(id);
 let oauthCandidateId;
+const integrationTabs = [...document.querySelectorAll('[role="tab"]')];
+function selectIntegration(tab) {
+  for (const item of integrationTabs) {
+    const selected = item === tab;
+    item.setAttribute('aria-selected', String(selected));
+    item.tabIndex = selected ? 0 : -1;
+    $(item.getAttribute('aria-controls')).hidden = !selected;
+  }
+}
+for (const tab of integrationTabs) {
+  tab.addEventListener('click', () => selectIntegration(tab));
+  tab.addEventListener('keydown', event => {
+    const index = integrationTabs.indexOf(tab);
+    const next = event.key === 'ArrowRight' ? (index + 1) % integrationTabs.length : event.key === 'ArrowLeft' ? (index + integrationTabs.length - 1) % integrationTabs.length : event.key === 'Home' ? 0 : event.key === 'End' ? integrationTabs.length - 1 : -1;
+    if (next < 0) return;
+    event.preventDefault(); selectIntegration(integrationTabs[next]); integrationTabs[next].focus();
+  });
+}
 async function message(payload) {
   const result = await chrome.runtime.sendMessage(payload);
   if (!result?.ok) throw new Error(result?.error || 'The extension is unavailable. Reload this page.');

@@ -28,6 +28,13 @@ body{margin:0;background:#161718;color:#eee;font:15px/1.6 Arial}aside{position:a
     const setup=await context.newPage();
     await setup.goto(`chrome-extension://${id}/options.html`);
     setup.on('pageerror',err=>errors.push(err.message));
+    assert.equal(await setup.getByRole('tab',{name:'Linear',exact:true}).getAttribute('aria-selected'),'true');
+    for (const platform of ['Jira','Notion','Trello']) {
+      await setup.getByRole('tab',{name:`${platform} Coming Soon`,exact:true}).click();
+      await setup.getByRole('tabpanel',{name:`${platform} Coming Soon`,exact:true}).waitFor();
+      assert.equal(await setup.getByRole('button',{name:'Sign in with Linear',exact:true}).isVisible(),false);
+    }
+    await setup.getByRole('tab',{name:'Linear',exact:true}).click();
     await setup.getByText('Bring your own API key',{exact:true}).click();
     await setup.locator('#key').fill('lin_api_TEST');
     await setup.locator('#workspace').fill('Example');

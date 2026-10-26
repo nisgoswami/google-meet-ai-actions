@@ -5,6 +5,13 @@
   <div class="eyebrow">GOOGLE MEET AI ACTIONS · GOOGLE MEET → LINEAR</div>
   <h1>Turn the discussion into a ticket.</h1>
   <p>Connect once. Send and Review buttons appear on messages in your Meet Gemini panel.</p>
+  <div class="integration-tabs" role="tablist" aria-label="Integrations">
+    <button id="tab-linear" role="tab" type="button" aria-selected="true" aria-controls="panel-linear" tabindex="0">Linear</button>
+    <button id="tab-jira" role="tab" type="button" aria-selected="false" aria-controls="panel-jira" tabindex="-1">Jira <span>Coming Soon</span></button>
+    <button id="tab-notion" role="tab" type="button" aria-selected="false" aria-controls="panel-notion" tabindex="-1">Notion <span>Coming Soon</span></button>
+    <button id="tab-trello" role="tab" type="button" aria-selected="false" aria-controls="panel-trello" tabindex="-1">Trello <span>Coming Soon</span></button>
+  </div>
+  <div id="panel-linear" role="tabpanel" aria-labelledby="tab-linear">
   <section id="current" hidden><strong id="destination"></strong><p>Configured on this browser profile.</p><button id="disconnect" class="secondary">Disconnect</button></section>
   <section id="oauth-connection"><h2>Sign in with Linear</h2><p>Approve access in Linear, then choose the team for your tickets.</p><button id="oauth-connect" type="button">Sign in with Linear</button>
     <form id="oauth-team-form" hidden><p id="oauth-workspace"></p><label for="oauth-team">Team</label><select id="oauth-team" required></select><button id="oauth-save" type="submit">Use this team</button><button id="oauth-cancel" type="button" class="secondary">Cancel connection</button></form>
@@ -31,4 +38,8 @@
   <label for="update-prompt">Ask for update prompt</label><textarea id="update-prompt" rows="15" maxlength="12000" required></textarea><button id="preset-update" type="button" class="secondary">Fill update preset</button><br><button type="submit">Save prompt templates</button><p id="prompts-status" role="status"></p></form></section>
   <section class="how"><h2>In your next call</h2><ol><li>Click <strong>Ask for ticket</strong> and enter the topic discussed in the call.</li><li>Click <strong>Send to Linear</strong> on that message, choose an action, and confirm.</li><li>Use <strong>Review</strong> to edit it, or use <strong>Ask for update</strong> to search recent tickets and prepare an update from the selected ticket.</li></ol></section>
   <p class="hint">Your login tokens or API key stay in this extension’s local browser storage. Ticket searches go directly to Linear. A selected ticket is copied into Ask Gemini only when you choose it. No audio, captions, or meeting history are recorded. Credentials are not synced or exposed to Meet.</p>
+  </div>
+  <div id="panel-jira" class="coming-soon" role="tabpanel" aria-labelledby="tab-jira" hidden><h2>Jira</h2><p>Coming Soon</p></div>
+  <div id="panel-notion" class="coming-soon" role="tabpanel" aria-labelledby="tab-notion" hidden><h2>Notion</h2><p>Coming Soon</p></div>
+  <div id="panel-trello" class="coming-soon" role="tabpanel" aria-labelledby="tab-trello" hidden><h2>Trello</h2><p>Coming Soon</p></div>
 </main><script src="prompts.js"></script><script src="options.js"></script></body></html>
