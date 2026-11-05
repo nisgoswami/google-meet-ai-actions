@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.1](https://github.com/nisgoswami/google-meet-ai-actions/compare/v1.5.0...v1.5.1) (2026-11-05)
+
+
+### Bug Fixes
+
+* keep action menus inside the viewport ([3efd120](https://github.com/nisgoswami/google-meet-ai-actions/commit/3efd12002079a1a700677b68ad315f6e3a5e42b7))
+
 ## [1.5.0](https://github.com/nisgoswami/google-meet-ai-actions/compare/v1.4.0...v1.5.0) (2026-10-26)
 
 
