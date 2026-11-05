@@ -367,6 +367,36 @@ async function ticketAction(page, name) {
     await page.getByRole('button',{name:'Replace selected fields ↗',exact:true}).click();
     await page.getByText('Updated:',{exact:false}).waitFor();
     assert.equal(await worker.evaluate(() => testRequests.at(-1).variables.input.assigneeId), 'member-1');
+    // Action menus stay visible at every viewport edge, including after expansion
+    // and resize. This reproduces the left-edge compact composer overflow.
+    async function assertMenuVisible() {
+      const menu = await page.locator('#action-menu').boundingBox();
+      const viewport = page.viewportSize();
+      assert.ok(menu && menu.width > 0 && menu.height > 0);
+      assert.ok(menu.x >= 7 && menu.y >= 7 && menu.x + menu.width <= viewport.width - 7 && menu.y + menu.height <= viewport.height - 7,
+        `Action menu stays inside viewport: ${JSON.stringify({menu, viewport})}`);
+      await page.getByRole('menuitem',{name:'Summarize Created Tickets',exact:true}).click();
+      await page.locator('#session-dialog').waitFor({state:'visible'});
+      await page.getByRole('button',{name:'Close',exact:true}).click();
+    }
+    for (const viewport of [{width:1280,height:900},{width:320,height:480},{width:320,height:240}]) {
+      await page.setViewportSize(viewport);
+      for (const corner of ['left:0;bottom:0','right:0;bottom:0','left:0;top:0','right:0;top:0']) {
+        await page.locator('body').evaluate((body, corner) => {
+          body.innerHTML = `<form style="position:fixed;${corner};width:280px;height:48px"><textarea aria-label="Ask Gemini" style="width:200px;height:40px"></textarea></form>`;
+        }, corner);
+        await page.getByRole('button',{name:'Action',exact:true}).waitFor();
+        await page.getByRole('button',{name:'Action',exact:true}).click();
+        await page.getByRole('menuitem',{name:'Tickets ▸',exact:true}).click();
+        await assertMenuVisible();
+      }
+    }
+    await page.getByRole('button',{name:'Action',exact:true}).click();
+    await page.getByRole('menuitem',{name:'Tickets ▸',exact:true}).click();
+    await page.setViewportSize({width:390,height:320});
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await assertMenuVisible();
+    await page.setViewportSize({width:1280,height:900});
     // Compact Gemini has neither a feed panel nor a footer/menu anchor.
     const writesBeforeCompact = await worker.evaluate(() => testRequests.length);
     for (const field of ['<textarea placeholder="Ask Gemini"></textarea>', '<div contenteditable="true" aria-label="Ask Gemini"></div>']) {

@@ -53,8 +53,27 @@
   promptHost.id = 'threadport-prompts';
   promptHost.style.cssText = 'display:none;position:fixed;z-index:2147483647;box-sizing:border-box;';
   const promptShadow = promptHost.attachShadow({ mode: 'closed' });
-  promptShadow.innerHTML = `<style>:host{color-scheme:dark}[hidden]{display:none!important}.prompts{position:relative;display:flex}button{font:500 12px/1.3 Arial,sans-serif;padding:7px 12px;border:1px solid #55565d;border-radius:6px;background:#202124;color:#dadce0;cursor:pointer}#action-toggle{width:100%;border-radius:18px}button:hover{background:#3c4043}button:focus-visible{outline:2px solid #c4b5fd;outline-offset:2px}.menu{position:absolute;bottom:calc(100% + 8px);right:0;width:230px;max-width:calc(100vw - 16px);padding:6px;background:#202124;border:1px solid #55565d;border-radius:8px;box-shadow:0 6px 24px #0008}.menu button{display:block;width:100%;text-align:left;border:0;white-space:normal}#ticket-actions{padding-left:10px;border-left:1px solid #55565d;margin-left:8px}</style><div class="prompts"><button id="action-toggle" aria-haspopup="menu" aria-expanded="false" aria-controls="action-menu">Action</button><div id="action-menu" class="menu" role="menu" aria-label="Action" hidden><button id="tickets-toggle" role="menuitem" aria-haspopup="menu" aria-expanded="false" aria-controls="ticket-actions">Tickets ▸</button><div id="ticket-actions" role="menu" aria-label="Tickets" hidden><button id="ask-ticket" role="menuitem" title="Prepare a ticket prompt in Ask Gemini">Create</button><button id="ask-update" role="menuitem" title="Prepare an issue update prompt in Ask Gemini">Update</button><button id="session-tickets" role="menuitem">Summarize Created Tickets</button></div></div></div>`;
+  promptShadow.innerHTML = `<style>:host{color-scheme:dark}[hidden]{display:none!important}.prompts{position:relative;display:flex}button{font:500 12px/1.3 Arial,sans-serif;padding:7px 12px;border:1px solid #55565d;border-radius:6px;background:#202124;color:#dadce0;cursor:pointer}#action-toggle{width:100%;border-radius:18px}button:hover{background:#3c4043}button:focus-visible{outline:2px solid #c4b5fd;outline-offset:2px}.menu{position:fixed;box-sizing:border-box;width:244px;max-width:calc(100vw - 16px);overflow-y:auto;overscroll-behavior:contain;padding:6px;background:#202124;border:1px solid #55565d;border-radius:8px;box-shadow:0 6px 24px #0008}.menu button{display:block;width:100%;text-align:left;border:0;white-space:normal}#ticket-actions{padding-left:10px;border-left:1px solid #55565d;margin-left:8px}</style><div class="prompts"><button id="action-toggle" aria-haspopup="menu" aria-expanded="false" aria-controls="action-menu">Action</button><div id="action-menu" class="menu" role="menu" aria-label="Action" hidden><button id="tickets-toggle" role="menuitem" aria-haspopup="menu" aria-expanded="false" aria-controls="ticket-actions">Tickets ▸</button><div id="ticket-actions" role="menu" aria-label="Tickets" hidden><button id="ask-ticket" role="menuitem" title="Prepare a ticket prompt in Ask Gemini">Create</button><button id="ask-update" role="menuitem" title="Prepare an issue update prompt in Ask Gemini">Update</button><button id="session-tickets" role="menuitem">Summarize Created Tickets</button></div></div></div>`;
   const $ = id => shadow.getElementById(id) || promptShadow.getElementById(id);
+  function positionActionMenu() {
+    const menu = $('action-menu');
+    if (menu.hidden || promptHost.style.display === 'none') return;
+    const viewport = window.visualViewport;
+    const left = (viewport?.offsetLeft || 0) + 8;
+    const top = (viewport?.offsetTop || 0) + 8;
+    const right = left + (viewport?.width || innerWidth) - 16;
+    const bottom = top + (viewport?.height || innerHeight) - 16;
+    const anchor = $('action-toggle').getBoundingClientRect();
+    menu.style.maxWidth = `${Math.max(0, right - left)}px`;
+    menu.style.maxHeight = `${Math.max(0, bottom - top)}px`;
+    const above = Math.max(0, anchor.top - 8 - top);
+    const below = Math.max(0, bottom - anchor.bottom - 8);
+    const openAbove = menu.scrollHeight + 2 <= above || above >= below;
+    menu.style.maxHeight = `${openAbove ? above : below}px`;
+    const box = menu.getBoundingClientRect();
+    menu.style.left = `${Math.max(left, Math.min(right - box.width, anchor.right - box.width))}px`;
+    menu.style.top = `${Math.max(top, Math.min(bottom - box.height, openAbove ? anchor.top - box.height - 8 : anchor.bottom + 8))}px`;
+  }
   function closeActionMenu() {
     $('action-menu').hidden = true; $('ticket-actions').hidden = true;
     $('action-toggle').setAttribute('aria-expanded','false');
@@ -62,12 +81,13 @@
   }
   $('action-toggle').addEventListener('click', () => {
     if (!$('action-menu').hidden) { closeActionMenu(); return; }
-    $('action-menu').hidden = false; $('action-toggle').setAttribute('aria-expanded','true'); $('tickets-toggle').focus();
+    $('action-menu').hidden = false; $('action-toggle').setAttribute('aria-expanded','true'); positionActionMenu(); $('tickets-toggle').focus();
   });
   $('tickets-toggle').addEventListener('click', () => {
     const expanded = $('ticket-actions').hidden;
     $('ticket-actions').hidden = !expanded;
     $('tickets-toggle').setAttribute('aria-expanded',String(expanded));
+    positionActionMenu();
     if (expanded) $('ask-ticket').focus();
   });
   for (const id of ['ask-ticket','ask-update','session-tickets']) $(id).addEventListener('click', closeActionMenu);
@@ -76,7 +96,7 @@
     if (event.key === 'Escape') { event.preventDefault(); closeActionMenu(); $('action-toggle').focus(); return; }
     if (!['ArrowDown','ArrowUp','Home','End','ArrowRight','ArrowLeft'].includes(event.key)) return;
     event.preventDefault();
-    if (event.key === 'ArrowLeft') { $('ticket-actions').hidden=true; $('tickets-toggle').setAttribute('aria-expanded','false'); $('tickets-toggle').focus(); return; }
+    if (event.key === 'ArrowLeft') { $('ticket-actions').hidden=true; $('tickets-toggle').setAttribute('aria-expanded','false'); positionActionMenu(); $('tickets-toggle').focus(); return; }
     if ($('action-menu').hidden) { $('action-toggle').click(); return; }
     if (promptShadow.activeElement === $('tickets-toggle') && event.key === 'ArrowRight') { if ($('ticket-actions').hidden) $('tickets-toggle').click(); return; }
     const items = [...$('action-menu').querySelectorAll('[role=menuitem]')].filter(el => !el.closest('[hidden]'));
@@ -622,6 +642,7 @@
       const top = box.bottom + 8;
       promptHost.style.top = `${Math.max(8, top + height <= innerHeight - 8 ? top : box.top - height - 8)}px`;
     }
+    positionActionMenu();
     // Compact mode offers prompt actions; response/review controls belong to the panel.
     if (!panel) $('bar').hidden = true;
     if (!host.isConnected) document.documentElement.append(host);
@@ -645,6 +666,8 @@
     if (records.some(record => record.target !== host && record.target !== promptHost && !record.target.closest?.('.meet-linear-message'))) schedule();
   }).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style', 'hidden', 'aria-hidden', 'aria-expanded'] });
   window.addEventListener('resize', schedule);
+  window.visualViewport?.addEventListener('resize', schedule);
+  window.visualViewport?.addEventListener('scroll', schedule);
   document.addEventListener('scroll', schedule, true);
   document.addEventListener('visibilitychange', schedule);
   window.addEventListener('focus', () => { status().catch(() => {}); schedule(); });

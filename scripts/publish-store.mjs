@@ -11,7 +11,12 @@ export async function publishStore({ token, publisherId, extensionId, version, v
       ...options, headers: { Authorization: `Bearer ${token}`, ...options.headers },
       signal: AbortSignal.timeout(60000)
     });
-    if (!response.ok) throw new Error(`Chrome Web Store request failed: HTTP ${response.status}. Check the API response in the developer dashboard.`);
+    if (!response.ok) {
+      let detail;
+      try { detail = JSON.stringify((await response.json()).error); } catch { detail = 'No JSON error details returned.'; }
+      detail = String(detail).replaceAll(token, '[REDACTED]').slice(0, 12000);
+      throw new Error(`Chrome Web Store ${url.split(':').at(-1)} failed: HTTP ${response.status}. ${detail}`);
+    }
     return response.json();
   }
   const status = await request(`${base}:fetchStatus`);

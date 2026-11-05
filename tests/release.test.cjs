@@ -43,3 +43,12 @@ test('failed uploads never send a publish request', async () => {
   await assert.rejects(publishStore(config,mock.deps), /No publish request sent/);
   assert.equal(mock.calls.length,2);
 });
+test('store validation errors identify the operation and redact the token', async () => {
+  const {publishStore} = await import('../scripts/publish-store.mjs');
+  await assert.rejects(publishStore(config, {fetchImpl: async () => new Response(JSON.stringify({error:{message:'Missing listing data test-token',details:[{reason:'MISSING_FIELD'}]}}), {status:400})}), error => {
+    assert.match(error.message, /fetchStatus failed: HTTP 400/);
+    assert.match(error.message, /MISSING_FIELD/);
+    assert.doesNotMatch(error.message, /test-token/);
+    return true;
+  });
+});
