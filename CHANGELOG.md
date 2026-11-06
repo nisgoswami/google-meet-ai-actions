@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.2](https://github.com/nisgoswami/google-meet-ai-actions/compare/v1.5.1...v1.5.2) (2026-11-06)
+
+
+### Bug Fixes
+
+* keep all menus and dialogs within the visible window ([467c1bc](https://github.com/nisgoswami/google-meet-ai-actions/commit/467c1bc05c4e95ad1c4d1d0d4b3d68258274bb27))
+
 ## [1.5.1](https://github.com/nisgoswami/google-meet-ai-actions/compare/v1.5.0...v1.5.1) (2026-11-05)
 
 
