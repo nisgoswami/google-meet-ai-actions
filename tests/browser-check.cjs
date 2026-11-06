@@ -367,9 +367,31 @@ async function ticketAction(page, name) {
     await page.getByRole('button',{name:'Replace selected fields ↗',exact:true}).click();
     await page.getByText('Updated:',{exact:false}).waitFor();
     assert.equal(await worker.evaluate(() => testRequests.at(-1).variables.input.assigneeId), 'member-1');
+    async function assertOverlayVisible(selector) {
+      const box = await page.locator(selector).boundingBox();
+      const viewport = await page.evaluate(() => ({width:visualViewport.width,height:visualViewport.height,left:visualViewport.offsetLeft,top:visualViewport.offsetTop}));
+      assert.ok(box && box.width > 0 && box.height > 0);
+      assert.ok(box.x >= viewport.left + 7 && box.y >= viewport.top + 7 && box.x + box.width <= viewport.left + viewport.width - 7 && box.y + box.height <= viewport.top + viewport.height - 7,
+        `${selector} stays inside viewport: ${JSON.stringify({box, viewport})}`);
+      assert.equal(await page.locator(selector).evaluate(el => el.scrollWidth <= el.clientWidth + 1), true,
+        `${selector} must not clip its content horizontally`);
+    }
+    // Every extension dialog remains bounded and scrollable on narrow/short windows.
+    for (const viewport of [{width:320,height:240},{width:240,height:160}]) {
+      await page.setViewportSize(viewport);
+      await answer.getByRole('button',{name:'Review',exact:true}).click();
+      await assertOverlayVisible('#editor');
+      await page.locator('#mode').selectOption('update');
+      await page.getByRole('button',{name:'Choose an existing ticket',exact:true}).click();
+      await assertOverlayVisible('#ticket-picker');
+      await page.locator('#picker-cancel').click();
+      await page.locator('#cancel').click();
+    }
+    await page.setViewportSize({width:1280,height:900});
     // Action menus stay visible at every viewport edge, including after expansion
     // and resize. This reproduces the left-edge compact composer overflow.
     async function assertMenuVisible() {
+      await assertOverlayVisible('#action-menu');
       const menu = await page.locator('#action-menu').boundingBox();
       const viewport = page.viewportSize();
       assert.ok(menu && menu.width > 0 && menu.height > 0);
@@ -377,9 +399,12 @@ async function ticketAction(page, name) {
         `Action menu stays inside viewport: ${JSON.stringify({menu, viewport})}`);
       await page.getByRole('menuitem',{name:'Summarize Created Tickets',exact:true}).click();
       await page.locator('#session-dialog').waitFor({state:'visible'});
+      await page.waitForFunction(() => !document.querySelector('#meet-to-linear').shadowRoot.getElementById('session-status').textContent.includes('Loading'));
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      await assertOverlayVisible('#session-dialog');
       await page.getByRole('button',{name:'Close',exact:true}).click();
     }
-    for (const viewport of [{width:1280,height:900},{width:320,height:480},{width:320,height:240}]) {
+    for (const viewport of [{width:1280,height:900},{width:320,height:480},{width:320,height:240},{width:240,height:160}]) {
       await page.setViewportSize(viewport);
       for (const corner of ['left:0;bottom:0','right:0;bottom:0','left:0;top:0','right:0;top:0']) {
         await page.locator('body').evaluate((body, corner) => {
@@ -387,8 +412,15 @@ async function ticketAction(page, name) {
         }, corner);
         await page.getByRole('button',{name:'Action',exact:true}).waitFor();
         await page.getByRole('button',{name:'Action',exact:true}).click();
+        await assertOverlayVisible('#action-menu');
         await page.getByRole('menuitem',{name:'Tickets ▸',exact:true}).click();
         await assertMenuVisible();
+        await ticketAction(page,'Create');
+        await assertOverlayVisible('#topic-dialog');
+        await page.locator('#topic-cancel').click();
+        await ticketAction(page,'Update');
+        await assertOverlayVisible('#ticket-picker');
+        await page.locator('#picker-cancel').click();
       }
     }
     await page.getByRole('button',{name:'Action',exact:true}).click();
@@ -397,6 +429,18 @@ async function ticketAction(page, name) {
     await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     await assertMenuVisible();
     await page.setViewportSize({width:1280,height:900});
+    const zoomSession = await context.newCDPSession(page);
+    await zoomSession.send('Emulation.setPageScaleFactor', {pageScaleFactor:2});
+    await page.getByRole('button',{name:'Action',exact:true}).click();
+    await page.getByRole('menuitem',{name:'Tickets ▸',exact:true}).click();
+    await assertOverlayVisible('#action-menu');
+    await page.screenshot({path:'/tmp/meet-actions-menu-fixed.png'});
+    await page.keyboard.press('Escape');
+    await ticketAction(page,'Create');
+    await assertOverlayVisible('#topic-dialog');
+    await page.locator('#topic-cancel').click();
+    await zoomSession.send('Emulation.setPageScaleFactor', {pageScaleFactor:1});
+    await zoomSession.detach();
     // Compact Gemini has neither a feed panel nor a footer/menu anchor.
     const writesBeforeCompact = await worker.evaluate(() => testRequests.length);
     for (const field of ['<textarea placeholder="Ask Gemini"></textarea>', '<div contenteditable="true" aria-label="Ask Gemini"></div>']) {
@@ -510,6 +554,6 @@ async function ticketAction(page, name) {
     assert.equal(await worker.evaluate(async()=>(await chrome.storage.local.get('linearOAuth')).linearOAuth),undefined);
     // The key cannot be read by the content script's isolated world.
     assert.deepEqual(errors,[]);
-    console.log('PASS: popup before writes, create/replace/append, JSON field separation, Markdown, prompt templates, nested Action → Tickets menu, compact composer actions, 320/390px menu-aligned floating layout and footer rerender, duplicate protection, session ticket links/reload/clear/Gemini summary, screenshot preview/removal/validation/creation, and no scripted sends. No real Linear calls.');
+    console.log('PASS: popup before writes, create/replace/append, JSON field separation, Markdown, prompt templates, nested Action → Tickets menu, compact composer actions, all overlay corners down to 240×160 and 2× zoom, 320/390px menu-aligned floating layout and footer rerender, duplicate protection, session ticket links/reload/clear/Gemini summary, screenshot preview/removal/validation/creation, and no scripted sends. No real Linear calls.');
   } finally { await context.close(); fs.rmSync(profile,{recursive:true,force:true}); }
 })().catch(error=>{console.error(error);process.exitCode=1;});

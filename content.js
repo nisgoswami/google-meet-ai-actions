@@ -17,7 +17,8 @@
       button:hover {background:#3c4043} button.primary {background:#c4b5fd;color:#211537;flex:1} button.primary:hover {background:#d7ccff}
       button:disabled {opacity:.6;cursor:wait} button:focus-visible,input:focus-visible,textarea:focus-visible {outline:2px solid #b3b9ff;outline-offset:2px}
       .toast {background:#202124;border-radius:8px;padding:10px;margin-top:6px;max-width:360px;box-shadow:0 4px 14px #0006;overflow-wrap:anywhere} a {color:#c4b5fd}
-      dialog {position:fixed;inset:0;width:min(540px,calc(100vw - 32px));max-height:calc(100vh - 40px);overflow:auto;background:#202124;color:#eee;border:1px solid #55565d;border-radius:14px;padding:24px;box-shadow:0 14px 60px #0009;font:14px/1.5 Arial,sans-serif}
+      dialog {position:fixed;inset:auto;margin:0;width:min(540px,calc(100vw - 32px));max-height:calc(100vh - 40px);overflow:auto;background:#202124;color:#eee;border:1px solid #55565d;border-radius:14px;padding:24px;box-shadow:0 14px 60px #0009;font:14px/1.5 Arial,sans-serif}
+      dialog {overflow-wrap:anywhere} dialog input,dialog textarea,dialog select,.properties>div {min-width:0;max-width:100%} @media(max-width:400px){dialog{padding:16px}dialog .properties{grid-template-columns:1fr}}
       dialog::backdrop {background:#0007} h2 {margin:0 0 8px;font-size:21px} p {color:#bdc1c6;margin:6px 0 18px}
       label {display:block;margin:16px 0 6px;font-weight:600} input,textarea,select {width:100%;font:14px/1.5 Arial,sans-serif;padding:10px;background:#151619;color:#eee;border:1px solid #5f6368;border-radius:7px} textarea {min-height:200px;resize:vertical} input[type=checkbox] {width:auto;margin-right:8px} .fields label {margin:8px 0;font-weight:400}
       .screenshots{display:flex;flex-wrap:wrap;gap:10px;margin:10px 0}.screenshots figure{margin:0;width:130px}.screenshots img{display:block;width:130px;height:85px;object-fit:contain;background:#151619;border:1px solid #5f6368;border-radius:6px}.screenshots figcaption{overflow-wrap:anywhere;font-size:12px}.screenshots button{white-space:normal}
@@ -55,19 +56,39 @@
   const promptShadow = promptHost.attachShadow({ mode: 'closed' });
   promptShadow.innerHTML = `<style>:host{color-scheme:dark}[hidden]{display:none!important}.prompts{position:relative;display:flex}button{font:500 12px/1.3 Arial,sans-serif;padding:7px 12px;border:1px solid #55565d;border-radius:6px;background:#202124;color:#dadce0;cursor:pointer}#action-toggle{width:100%;border-radius:18px}button:hover{background:#3c4043}button:focus-visible{outline:2px solid #c4b5fd;outline-offset:2px}.menu{position:fixed;box-sizing:border-box;width:244px;max-width:calc(100vw - 16px);overflow-y:auto;overscroll-behavior:contain;padding:6px;background:#202124;border:1px solid #55565d;border-radius:8px;box-shadow:0 6px 24px #0008}.menu button{display:block;width:100%;text-align:left;border:0;white-space:normal}#ticket-actions{padding-left:10px;border-left:1px solid #55565d;margin-left:8px}</style><div class="prompts"><button id="action-toggle" aria-haspopup="menu" aria-expanded="false" aria-controls="action-menu">Action</button><div id="action-menu" class="menu" role="menu" aria-label="Action" hidden><button id="tickets-toggle" role="menuitem" aria-haspopup="menu" aria-expanded="false" aria-controls="ticket-actions">Tickets ▸</button><div id="ticket-actions" role="menu" aria-label="Tickets" hidden><button id="ask-ticket" role="menuitem" title="Prepare a ticket prompt in Ask Gemini">Create</button><button id="ask-update" role="menuitem" title="Prepare an issue update prompt in Ask Gemini">Update</button><button id="session-tickets" role="menuitem">Summarize Created Tickets</button></div></div></div>`;
   const $ = id => shadow.getElementById(id) || promptShadow.getElementById(id);
-  function positionActionMenu() {
-    const menu = $('action-menu');
-    if (menu.hidden || promptHost.style.display === 'none') return;
+  // All overlays use the visible viewport, including zoom and virtual keyboards.
+  function overlayBounds() {
     const viewport = window.visualViewport;
     const left = (viewport?.offsetLeft || 0) + 8;
     const top = (viewport?.offsetTop || 0) + 8;
-    const right = left + (viewport?.width || innerWidth) - 16;
-    const bottom = top + (viewport?.height || innerHeight) - 16;
+    const width = Math.max(0, (viewport?.width ?? innerWidth) - 16);
+    const height = Math.max(0, (viewport?.height ?? innerHeight) - 16);
+    return { left, top, width, height, right: left + width, bottom: top + height };
+  }
+  function positionDialogs() {
+    const bounds = overlayBounds();
+    for (const dialog of shadow.querySelectorAll('dialog[open]')) {
+      dialog.style.width = `${Math.min(540, bounds.width)}px`;
+      dialog.style.maxWidth = `${bounds.width}px`;
+      dialog.style.maxHeight = `${bounds.height}px`;
+      const box = dialog.getBoundingClientRect();
+      dialog.style.left = `${bounds.left + Math.max(0, (bounds.width - box.width) / 2)}px`;
+      dialog.style.top = `${bounds.top + Math.max(0, (bounds.height - box.height) / 2)}px`;
+    }
+  }
+  function showDialog(dialog) {
+    dialog.showModal();
+    positionDialogs();
+  }
+  function positionActionMenu() {
+    const menu = $('action-menu');
+    if (menu.hidden || promptHost.style.display === 'none') return;
+    const { left, top, right, bottom, width, height } = overlayBounds();
     const anchor = $('action-toggle').getBoundingClientRect();
-    menu.style.maxWidth = `${Math.max(0, right - left)}px`;
-    menu.style.maxHeight = `${Math.max(0, bottom - top)}px`;
-    const above = Math.max(0, anchor.top - 8 - top);
-    const below = Math.max(0, bottom - anchor.bottom - 8);
+    menu.style.maxWidth = `${width}px`;
+    menu.style.maxHeight = `${height}px`;
+    const above = Math.max(0, Math.min(height, anchor.top - 8 - top));
+    const below = Math.max(0, Math.min(height, bottom - anchor.bottom - 8));
     const openAbove = menu.scrollHeight + 2 <= above || above >= below;
     menu.style.maxHeight = `${openAbove ? above : below}px`;
     const box = menu.getBoundingClientRect();
@@ -257,7 +278,7 @@
     syncActionUI();
     refreshProperties();
     $('editor-status').textContent = '';
-    if (!$('editor').open) $('editor').showModal();
+    if (!$('editor').open) showDialog($('editor'));
     $('title').focus();
     captured = '';
     status().catch(error => $('editor-status').textContent = error.message);
@@ -506,7 +527,7 @@
     if (!event.isTrusted || busy) return;
     renderSessionTickets([]);
     $('session-status').textContent = 'Loading session tickets…';
-    $('session-dialog').showModal();
+    showDialog($('session-dialog'));
     try { const {tickets} = await sendMessage({type:'sessionTickets'}); renderSessionTickets(tickets); }
     catch (error) { $('session-status').textContent = error.message; }
   });
@@ -525,7 +546,7 @@
       pendingIntent = 'create'; pendingIssue = null;
       $('session-dialog').close();
       await insertPrompt(prompt);
-    } catch (error) { $('session-dialog').showModal(); $('session-status').textContent = error.message; }
+    } catch (error) { showDialog($('session-dialog')); $('session-status').textContent = error.message; }
     finally { $('session-summary').disabled = !currentSessionTickets.length; }
   }
   $('session-summary').addEventListener('click', event => prepareSessionPrompt(event));
@@ -569,7 +590,7 @@
   $('ask-ticket').addEventListener('click', event => {
     if (!event.isTrusted || busy) return;
     $('new-topic').value=clean(input?.innerText || input?.value);
-    $('topic-status').textContent=''; $('topic-dialog').showModal(); $('new-topic').focus();
+    $('topic-status').textContent=''; showDialog($('topic-dialog')); $('new-topic').focus();
   });
   $('topic-cancel').addEventListener('click',()=> $('topic-dialog').close());
   $('topic-prepare').addEventListener('click',async event=>{
@@ -577,18 +598,18 @@
     const topic=$('new-topic').value.trim();
     if(!topic){$('topic-status').textContent='Enter the topic discussed in this call.';return;}
     try {$('topic-dialog').close();await preparePrompt(false,topic);}
-    catch(error){$('topic-dialog').showModal();$('topic-status').textContent=error.message;}
+    catch(error){showDialog($('topic-dialog'));$('topic-status').textContent=error.message;}
   });
   $('ask-update').addEventListener('click',async event=>{
     if (!event.isTrusted || busy) return;
     pickerPurpose='prompt';
     $('ticket-search').value=''; $('update-topic').value=clean(input?.innerText || input?.value);
-    $('ticket-picker').showModal(); $('ticket-search').focus();
+    showDialog($('ticket-picker')); $('ticket-search').focus();
     await loadTickets();
   });
   $('choose-existing').addEventListener('click',async event=>{
     if(!event.isTrusted || busy)return;
-    pickerPurpose='editor';$('ticket-search').value=$('title').value.split(' - ')[0];$('update-topic').value='';$('ticket-picker').showModal();await loadTickets();
+    pickerPurpose='editor';$('ticket-search').value=$('title').value.split(' - ')[0];$('update-topic').value='';showDialog($('ticket-picker'));await loadTickets();
   });
   $('title').addEventListener('input',()=>{++detectionGeneration;});
   $('ticket-search').addEventListener('input',()=>{ clearTimeout(searchTimer); ++pickerGeneration; searchTimer=setTimeout(()=>loadTickets(),300); });
@@ -602,6 +623,7 @@
   });
 
   function reposition() {
+    positionDialogs();
     input = adapter.input();
     const composer = input || adapter.launcher();
     // Meet changes data-feed-title to the conversation title after the first prompt.
@@ -642,6 +664,12 @@
       const top = box.bottom + 8;
       promptHost.style.top = `${Math.max(8, top + height <= innerHeight - 8 ? top : box.top - height - 8)}px`;
     }
+    if (promptHost.style.display !== 'none') {
+      const bounds = overlayBounds();
+      const box = promptHost.getBoundingClientRect();
+      promptHost.style.left = `${Math.max(bounds.left, Math.min(bounds.right - box.width, box.left))}px`;
+      promptHost.style.top = `${Math.max(bounds.top, Math.min(bounds.bottom - box.height, box.top))}px`;
+    }
     positionActionMenu();
     // Compact mode offers prompt actions; response/review controls belong to the panel.
     if (!panel) $('bar').hidden = true;
@@ -649,7 +677,7 @@
     const box = (input ? input.closest('footer') || input.parentElement : composer).getBoundingClientRect();
     const inputBox = composer.getBoundingClientRect();
     host.style.display = 'block';
-    const width = Math.min(360, Math.max(270, box.width - 24));
+    const width = Math.min(overlayBounds().width, 360, Math.max(270, box.width - 24));
     host.style.width = `${width}px`;
     host.style.left = `${Math.max(8, Math.min(innerWidth - width - 8, inputBox.left))}px`;
     // Above the composer: never cover Gemini's native send button or editor.
@@ -661,6 +689,10 @@
     queued = true;
     requestAnimationFrame(() => { queued = false; reposition(); });
   }
+  // Async ticket lists, validation messages and resized textareas can change
+  // dialog height without a page mutation. Keep the larger dialog centered too.
+  const dialogResizeObserver = new ResizeObserver(schedule);
+  for (const dialog of shadow.querySelectorAll('dialog')) dialogResizeObserver.observe(dialog);
   // Do not observe our own UI, which lives in its shadow root.
   new MutationObserver(records => {
     if (records.some(record => record.target !== host && record.target !== promptHost && !record.target.closest?.('.meet-linear-message'))) schedule();
